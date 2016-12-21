@@ -1,5 +1,5 @@
 [Unit]
-Description=Template Service
+Description=App Deployment Service
 After=network.target
 
 [Service]

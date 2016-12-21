@@ -1,4 +1,4 @@
-package i5.las2peer.services.servicePackage;
+package i5.las2peer.services.deployService;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -23,7 +23,7 @@ import org.junit.Test;
  * Example Test Class demonstrating a basic JUnit test structure.
  *
  */
-public class ServiceTest {
+public class DeployServiceTest {
 
 	private static final String HTTP_ADDRESS = "http://127.0.0.1";
 	private static final int HTTP_PORT = WebConnector.DEFAULT_HTTP_PORT;
@@ -35,7 +35,7 @@ public class ServiceTest {
 	private static UserAgent testAgent;
 	private static final String testPass = "adamspass";
 
-	private static final String mainPath = "template/";
+	private static final String mainPath = "deploy/";
 
 	/**
 	 * Called before the tests start.
@@ -56,7 +56,7 @@ public class ServiceTest {
 
 		// during testing, the specified service version does not matter
 		ServiceAgent testService = ServiceAgent.createServiceAgent(
-				ServiceNameVersion.fromString(TemplateService.class.getName() + "@1.0"), "a pass");
+				ServiceNameVersion.fromString(DeployService.class.getName() + "@1.0"), "a pass");
 		testService.unlockPrivateKey("a pass");
 
 		node.registerReceiver(testService);

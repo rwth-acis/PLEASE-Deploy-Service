@@ -1,0 +1,15 @@
+.idea/
+etc/ivy/ivy.jar
+etc/startup/
+etc/las2peer.policy
+node-storage/
+out/
+export/
+lib/
+log/
+service/
+tmp/
+
+# IntelliJ IDEA
+*.iml
+.idea/
