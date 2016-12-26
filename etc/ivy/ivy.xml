@@ -12,9 +12,7 @@
         <dependency org="i5" name="las2peer" rev="0.6.4" changing="true" conf="platform->*" />
         <dependency org="i5" name="las2peer-web-connector" rev="0.6.4" changing="true" conf="platform->*" />
         <dependency org="junit" name="junit" rev="4.12" conf="platform->default" />
-        <!-- Add service dependencies here. Don't forget to add all libraries to /etc/ant_configuration/service.properties -->
-		<!-- example:
-		<dependency org="mysql" name="mysql-connector-java" rev="5.1.6" conf="bundle->default" />
-		-->
+        <!-- json parsing and writing -->
+        <dependency org="org.glassfish" name="javax.json" rev="1.0.4" conf="platform->default"/>
     </dependencies>
 </ivy-module>
