@@ -26,28 +26,29 @@ public class DockerHelperTest {
         l = MyLogger.getLogger();
     }
 
+    private Map<String, Object> getConfig(int cpu, int memory, int disk, String base, String command) {
+        Map<String, Object> config = new HashMap<>();
+        config.put("cpu", cpu);
+        config.put("memory", memory);
+        config.put("disk", disk);
+        config.put("base", base);
+        config.put("command", command);
+        return config;
+    }
+
     @Test
     public void startContainer() throws Exception {
         DockerHelper dh = new DockerHelper();
-        Map<String, Object> config = new HashMap<>();
-        config.put("cpu", 512);
-        config.put("memory", (int)100e6);
-        config.put("disk", (int)220e6);
-        config.put("base", "busybox");
-        config.put("command", "echo \"hello world!\"");
+        Map<String, Object> config = getConfig(512, 100_000_000, 220_000_000, "busybox", "echo \"hello world!\"");
         String cid = dh.startContainer(config);
         assertTrue("<"+cid+"> is not valid container id", cid.matches("[0-9a-f]{15,}+"));
     }
 
     @Test
-    public void updateContainer() throws Exception {
+    public void updateAndRollbackContainer() throws Exception {
         DockerHelper dh = new DockerHelper();
         String[] output;
-        Map<String, Object> config = new HashMap<>();
-        config.put("cpu", 512);
-        config.put("memory", (int)100e6);
-        config.put("disk", (int)220e6);
-        config.put("base", "busybox");
+        Map<String, Object> config = getConfig(512, 100_000_000, 220_000_000, "busybox", null);
 
         // start first
         config.put("command", "sh -c \"while(true); do nc -l -p 4444 -e printf 'first apple'; done\"");
@@ -68,10 +69,11 @@ public class DockerHelperTest {
         assertEquals("second banana",
                 dh.executeProcess("nc "+ip6+" 4444").trim());
         assertEquals(ip6, dh.getIp(cid2));
-    }
 
-//    @Test
-//    public void rollbackContainer() throws Exception {
-//
-//    }
+        // rollback
+        dh.rollbackContainer(cid2, cid1);
+        assertEquals("first apple",
+                dh.executeProcess("nc "+ip6+" 4444").trim());
+        assertEquals(ip6, dh.getIp(cid1));
+    }
 }

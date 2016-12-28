@@ -56,12 +56,12 @@ public class DockerHelper {
         executeProcess("docker pause "+cid_old);
     }
 
-//    public void rollbackContainer(String cid, String cid_old) throws IOException {
-//        String ip6 = getIp(cid);
-//        executeProcess("docker unpause "+cid_old);
-//        executeProcess("docker network disconnect please "+cid);
-//        executeProcess("docker network connect --ip6="+ip6+" please "+cid_old);
-//    }
+    public void rollbackContainer(String cid, String cid_old) throws IOException {
+        String ip6 = getIp(cid);
+        executeProcess("docker unpause "+cid_old);
+        executeProcess("docker network disconnect please "+cid);
+        executeProcess("docker network connect --ip6="+ip6+" please "+cid_old);
+    }
 
     public void removeAllContainers() throws IOException {
         String allContainers = executeProcess("docker ps -a -q").replaceAll("\n"," ");
