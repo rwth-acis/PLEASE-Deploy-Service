@@ -11,10 +11,14 @@ import java.util.Scanner;
  * Created by adabru on 26.12.16.
  */
 public class DeployServiceHelper {
+    private DockerHelper dh;
+
+    public DeployServiceHelper(DockerHelper dh){ this.dh = dh; }
+
     public Map<String,Object> guardedConfig(JsonObject json) {
         // TODO get limits for authenticated user
         int user_max_memory = (int)50e6;
-        int user_max_disk = (int)50e6;
+        int user_max_disk = (int)250e6;
         int user_max_cpu = 512;
 
         Map<String,Object> config = new HashMap<>();
@@ -34,21 +38,17 @@ public class DeployServiceHelper {
         return config;
     }
 
-    public String startContainer(JsonObject json) throws IOException {
+    public String startApp(JsonObject json) throws IOException {
         Map<String, Object> config = guardedConfig(json);
-        String dockercmd = "docker run -d"
-                + " --memory "            + config.get("memory")
-                + " --cpu-shares "        + config.get("cpu")
-//                + " --storage-opt size="  + config.get("disk")
-                + " --env="               + config.get("env")
-                + " "                     + config.get("base")
-                + " "                     + config.get("command");
-        Process p = new ProcessBuilder(dockercmd.split(" ")).start();
-        Scanner s = new Scanner(p.getErrorStream()).useDelimiter("\\A");
-        if (s.hasNext())
-            System.out.println(s.next());
-        return new Scanner(p.getInputStream()).useDelimiter("\\A").next().trim();
+        String cid = dh.startContainer(config);
+        return cid;
     }
+
+    public String updateApp(String cid_old, String cid_new) throws IOException {
+        dh.updateContainer(cid_old, cid_new);
+        return "yolo";
+    }
+
 
     public static JsonStructure stringToJson(String s) {
         JsonReader jr = Json.createReader(new StringReader(s));
