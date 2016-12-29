@@ -23,17 +23,21 @@ public class MyLogger {
 
                     String[] color = new String[]{"", ""};
                     if (record.getLevel().equals(Level.WARNING)) {
+                        // bright yellow
                         color[0] = "\u001b[33;1m";
                         color[1] = "\u001b[39;22m";
                     } else if (record.getLevel().equals(Level.SEVERE)) {
+                        // red
                         color[0] = "\u001b[31m";
                         color[1] = "\u001b[39m";
                     } else if (record.getLevel().equals(Level.INFO)) {
+                        // yellow
                         color[0] = "\u001b[33m";
                         color[1] = "\u001b[39m";
                     }
 
                     if (msg.length() > 1)
+                        // inverse color
                         msg = "\u001b[7m" + msg.substring(0,1) + "\u001b[27m" + msg.substring(1);
                     return color[0] + msg.replaceAll("\n",color[1]+"\n"+color[0])+color[1] + "\n";
                 }

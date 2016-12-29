@@ -48,7 +48,7 @@ public class DockerHelper {
     }
 
     public void updateContainer(String cid_old, String cid_new) throws IOException {
-//        after rollback deadline: docker rm -f cid_old
+        // after rollback deadline: docker rm -f cid_old
         String ip6 = getIp(cid_old);
         executeProcess("docker network disconnect please "+cid_old);
         executeProcess("docker network disconnect please "+cid_new);
