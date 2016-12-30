@@ -1,11 +1,11 @@
 package i5.las2peer.services.deployService;
 
 import javax.json.*;
+import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.io.StringReader;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Scanner;
 
 /**
  * Created by adabru on 26.12.16.
@@ -15,7 +15,7 @@ public class DeployServiceHelper {
 
     public DeployServiceHelper(DockerHelper dh){ this.dh = dh; }
 
-    public Map<String,Object> guardedConfig(JsonObject json) {
+    private Map<String,Object> guardedConfig(JsonObject json) {
         // TODO get limits for authenticated user
         int user_max_memory = (int)50e6;
         int user_max_disk = (int)250e6;
@@ -36,6 +36,10 @@ public class DeployServiceHelper {
         config.put("command", json.getString("command", "\"echo hello world!\""));
 
         return config;
+    }
+
+    public Response getAllApps() {
+        return Response.ok().entity("asdf").build();
     }
 
     public String startApp(JsonObject json) throws IOException {

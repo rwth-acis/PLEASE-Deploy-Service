@@ -1,18 +1,17 @@
 package i5.las2peer.services.deployService;
 
-import com.sun.xml.internal.ws.policy.privateutil.PolicyUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import javax.json.JsonObject;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Scanner;
-import java.util.logging.Logger;
 
 /**
  * Created by adabru on 27.12.16.
  */
 public class DockerHelper {
-    private Logger l = MyLogger.getLogger();
+    private Logger l = LoggerFactory.getLogger(DockerHelper.class.getName());
 
     public String executeProcess(String shellcommand) throws IOException {
         String errOut=null, stdOut=null;
@@ -24,7 +23,7 @@ public class DockerHelper {
         if (s.hasNext()) errOut = s.next(); else errOut = "";
         if (errOut.length() > 0) {
             l.info(shellcommand);
-            l.warning(errOut);
+            l.warn(errOut);
         }
         return stdOut;
     }

@@ -4,11 +4,12 @@ import org.hamcrest.Description;
 import org.hamcrest.TypeSafeMatcher;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
 import static org.hamcrest.CoreMatchers.is;
@@ -18,12 +19,11 @@ import static org.junit.Assert.*;
  * Created by adabru on 27.12.16.
  */
 public class DockerHelperTest {
-    private static Logger l;
+    private static Logger l = LoggerFactory.getLogger("");
 
     @BeforeClass
     public static void setup() throws IOException {
         new DockerHelper().removeAllContainers();
-        l = MyLogger.getLogger();
     }
 
     private Map<String, Object> getConfig(int cpu, int memory, int disk, String base, String command) {

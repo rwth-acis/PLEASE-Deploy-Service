@@ -14,5 +14,12 @@
         <dependency org="junit" name="junit" rev="4.12" conf="platform->default" />
         <!-- json parsing and writing -->
         <dependency org="org.glassfish" name="javax.json" rev="1.0.4" conf="platform->default"/>
+        <!-- database implementation -->
+        <dependency org="com.h2database" name="h2" rev="1.4.192" conf="platform->default"/>
+        <!-- database migration, see https://flywaydb.org -->
+        <dependency org="org.flywaydb" name="flyway-core" rev="4.0.3" conf="platform->default"/>
+        <!-- logging, partly due to flyway dependency -->
+        <dependency org="org.slf4j" name="slf4j-api" rev="1.7.22" conf="platform->default"/>
+        <dependency org="org.slf4j" name="slf4j-jdk14" rev="1.7.22" conf="platform->default"/>
     </dependencies>
 </ivy-module>
