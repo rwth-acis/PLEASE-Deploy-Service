@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Scanner;
 
@@ -28,13 +29,19 @@ public class DockerHelper {
         return stdOut;
     }
 
+    // returns cid
     public String startContainer(Map<String, Object> config) throws IOException {
+        StringBuilder env = new StringBuilder("");
+        ((Map<String, String>)config.getOrDefault("env", new HashMap<>())).forEach(
+                (key, value) -> env.append(" -e "+key+"=\""+value.replaceAll("\"", "\\\"")+"\"")
+        );
+
         String dockercmd = "docker run -d"
                 + " --network=please"
                 + " --memory "            + config.get("memory")
                 + " --cpu-shares "        + config.get("cpu")
                 + " --storage-opt size="  + config.get("disk")
-                + " --env="               + config.get("env")
+                + env
                 + " "                     + config.get("base")
                 + " "                     + config.get("command");
         return executeProcess(dockercmd).trim();
@@ -60,6 +67,12 @@ public class DockerHelper {
         executeProcess("docker unpause "+cid_old);
         executeProcess("docker network disconnect please "+cid);
         executeProcess("docker network connect --ip6="+ip6+" please "+cid_old);
+    }
+
+    public String commitContainer(String cid) throws IOException {
+        String imageid = executeProcess("docker commit "+cid);
+        imageid = imageid.replace("sha256:","").replace("\n","");
+        return imageid;
     }
 
     public void removeAllContainers() throws IOException {

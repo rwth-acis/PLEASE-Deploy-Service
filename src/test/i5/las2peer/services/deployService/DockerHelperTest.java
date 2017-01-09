@@ -19,8 +19,6 @@ import static org.junit.Assert.*;
  * Created by adabru on 27.12.16.
  */
 public class DockerHelperTest {
-    private static Logger l = LoggerFactory.getLogger("");
-
     @BeforeClass
     public static void setup() throws IOException {
         new DockerHelper().removeAllContainers();
