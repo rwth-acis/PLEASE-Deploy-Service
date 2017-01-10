@@ -17,7 +17,7 @@ public class IpPool {
     public IpPool(String net) {
         Pattern pattern = Pattern.compile("([0-9a-f:]+)/([0-9]+)");
         Matcher matcher = pattern.matcher(net);
-        if (!matcher.find()) throw new IllegalArgumentException("net must be [address]/[prefix]");
+        if (!matcher.find()) throw new IllegalArgumentException("net must be [address]/[prefix] but is "+net);
         address = parseIp6(matcher.group(1));
         prefix = Integer.parseInt(matcher.group(2));
         allocated = new HashSet<>();

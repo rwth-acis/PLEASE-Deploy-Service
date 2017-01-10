@@ -12,19 +12,32 @@ import java.util.Scanner;
  * Created by adabru on 27.12.16.
  */
 public class DockerHelper {
-    private Logger l = LoggerFactory.getLogger(DockerHelper.class.getName());
+    private static Logger l = LoggerFactory.getLogger(DockerHelper.class.getName());
     private IpPool ips;
+    private String network;
 
-    public DockerHelper() throws IOException {
-        String subnet = executeProcess("docker network inspect please --format='{{with index .IPAM.Config 1}}{{.IPRange}}{{end}}'");
-        ips = new IpPool(subnet);
-        // docker doesn't use ::
-        ips.allocIp();
-        // reservce default gateway ::1
-        ips.allocIp();
+    public DockerHelper() throws IOException { this("please"); }
+    public DockerHelper(String network) throws IOException { this(network, null); }
+    public DockerHelper(String network, String subnet) throws IOException {
+        if (!network.matches("[a-zA-Z0-9]+"))
+            throw new IllegalArgumentException("network name must be [a-zA-Z0-9]+ but is <"+network+">");
+        this.network = network;
+        if (subnet == null) {
+            subnet = executeProcess("docker network inspect "+network+" --format='{{with index .IPAM.Config 1}}{{.IPRange}}{{end}}'");
+            ips = new IpPool(subnet);
+            // docker doesn't use ::
+            ips.allocIp();
+            // reservce default gateway ::1
+            ips.allocIp();
+        } else {
+            ips = new IpPool(subnet);
+            ips.allocIp();
+            executeProcess("docker network rm " + network);
+            executeProcess("docker network create --driver=bridge --ipv6 --subnet=" + subnet + " --ip-range=" + subnet + " --gateway=" + ips.allocIp() + " " + network);
+        }
     }
 
-    public String executeProcess(String shellcommand) throws IOException {
+    public static String executeProcess(String shellcommand) throws IOException {
         String errOut=null, stdOut=null;
         Process p = new ProcessBuilder("sh","-c",shellcommand).start();
         Scanner s;
@@ -48,7 +61,7 @@ public class DockerHelper {
         );
 
         String dockercmd = "docker run -d"
-                + " --network=please"
+                + " --network="+network
                 + " --memory "            + config.get("memory")
                 + " --cpu-shares "        + config.get("cpu")
                 + " --storage-opt size="  + config.get("disk")
@@ -60,7 +73,7 @@ public class DockerHelper {
     }
 
     public String getIp(String cid) throws IOException {
-        String ip6 = executeProcess("docker inspect --format='{{.NetworkSettings.Networks.please.GlobalIPv6Address}}' "+cid).trim();
+        String ip6 = executeProcess("docker inspect --format='{{.NetworkSettings.Networks."+network+".GlobalIPv6Address}}' "+cid).trim();
         assert ip6.matches("[0-9a-f:]{3,}+");
         return ip6;
     }
@@ -68,17 +81,17 @@ public class DockerHelper {
     public void updateContainer(String cid_old, String cid_new) throws IOException {
         // after rollback deadline: docker rm -f cid_old
         String ip6 = getIp(cid_old);
-        executeProcess("docker network disconnect please "+cid_old);
-        executeProcess("docker network disconnect please "+cid_new);
-        executeProcess("docker network connect --ip6="+ip6+" please "+cid_new);
+        executeProcess("docker network disconnect "+network+" "+cid_old);
+        executeProcess("docker network disconnect "+network+" "+cid_new);
+        executeProcess("docker network connect --ip6="+ip6+" "+network+" "+cid_new);
         executeProcess("docker pause "+cid_old);
     }
 
     public void rollbackContainer(String cid, String cid_old) throws IOException {
         String ip6 = getIp(cid);
         executeProcess("docker unpause "+cid_old);
-        executeProcess("docker network disconnect please "+cid);
-        executeProcess("docker network connect --ip6="+ip6+" please "+cid_old);
+        executeProcess("docker network disconnect "+network+" "+cid);
+        executeProcess("docker network connect --ip6="+ip6+" "+network+" "+cid_old);
     }
 
     public String commitContainer(String cid) throws IOException {
@@ -87,7 +100,7 @@ public class DockerHelper {
         return imageid;
     }
 
-    public void removeAllContainers() throws IOException {
+    public static void removeAllContainers() throws IOException {
         String allContainers = executeProcess("docker ps -a -q").replaceAll("\n"," ");
         if (allContainers.equals(""))
             return;

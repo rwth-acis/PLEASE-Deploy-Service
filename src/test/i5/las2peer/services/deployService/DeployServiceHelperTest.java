@@ -31,15 +31,13 @@ import static org.junit.Assert.*;
 public class DeployServiceHelperTest {
     static Logger l = LoggerFactory.getLogger("");
 
-    private DockerHelper dh;
+    static DockerHelper dh;
+    static String classHash = String.format("%4x", DeployServiceHelperTest.class.getName().hashCode() & 65535);
 
     @BeforeClass
     public static void setup() throws IOException {
-        new DockerHelper().removeAllContainers();
-    }
-
-    public DeployServiceHelperTest() throws IOException {
-        dh = new DockerHelper();
+        DockerHelper.removeAllContainers();
+        dh = new DockerHelper(classHash, "fc00:"+classHash+"::/32");
     }
 
     private DatabaseManager getMock(int testNumber) {

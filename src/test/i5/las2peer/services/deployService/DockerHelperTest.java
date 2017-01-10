@@ -19,9 +19,14 @@ import static org.junit.Assert.*;
  * Created by adabru on 27.12.16.
  */
 public class DockerHelperTest {
+    private static DockerHelper dh;
+
+    static String classHash = String.format("%4x", DockerHelperTest.class.getName().hashCode() & 65535);
+
     @BeforeClass
     public static void setup() throws IOException {
-        new DockerHelper().removeAllContainers();
+        DockerHelper.removeAllContainers();
+        dh = new DockerHelper(classHash, "fc00:"+classHash+"::/32");
     }
 
     private Map<String, Object> getConfig(int cpu, int memory, int disk, String base, String command) {
@@ -36,7 +41,6 @@ public class DockerHelperTest {
 
     @Test
     public void startContainer() throws Exception {
-        DockerHelper dh = new DockerHelper();
         Map<String, Object> config = getConfig(512, 100_000_000, 220_000_000, "busybox", "echo \"hello world!\"");
         String cid = dh.startContainer(config);
         assertTrue("<"+cid+"> is not valid container id", cid.matches("[0-9a-f]{15,}+"));
@@ -44,7 +48,6 @@ public class DockerHelperTest {
 
     @Test
     public void updateAndRollbackContainer() throws Exception {
-        DockerHelper dh = new DockerHelper();
         String[] output;
         Map<String, Object> config = getConfig(512, 100_000_000, 220_000_000, "busybox", null);
 
