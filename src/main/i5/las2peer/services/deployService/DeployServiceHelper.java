@@ -137,7 +137,10 @@ public class DeployServiceHelper {
     }
 
     public String updateApp(String cid_old, String cid_new) throws IOException {
+        // get ip
+        // start new
         dh.updateContainer(cid_old, cid_new);
+        // free ip
         return "yolo";
     }
 

@@ -13,6 +13,16 @@ import java.util.Scanner;
  */
 public class DockerHelper {
     private Logger l = LoggerFactory.getLogger(DockerHelper.class.getName());
+    private IpPool ips;
+
+    public DockerHelper() throws IOException {
+        String subnet = executeProcess("docker network inspect please --format='{{with index .IPAM.Config 1}}{{.IPRange}}{{end}}'");
+        ips = new IpPool(subnet);
+        // docker doesn't use ::
+        ips.allocIp();
+        // reservce default gateway ::1
+        ips.allocIp();
+    }
 
     public String executeProcess(String shellcommand) throws IOException {
         String errOut=null, stdOut=null;
@@ -31,6 +41,7 @@ public class DockerHelper {
 
     // returns cid
     public String startContainer(Map<String, Object> config) throws IOException {
+        // TODO recycle ip6 addresses
         StringBuilder env = new StringBuilder("");
         ((Map<String, String>)config.getOrDefault("env", new HashMap<>())).forEach(
                 (key, value) -> env.append(" -e "+key+"=\""+value.replaceAll("\"", "\\\"")+"\"")
@@ -41,6 +52,7 @@ public class DockerHelper {
                 + " --memory "            + config.get("memory")
                 + " --cpu-shares "        + config.get("cpu")
                 + " --storage-opt size="  + config.get("disk")
+                + " --ip6="              + config.getOrDefault("ip6", ips.allocIp())
                 + env
                 + " "                     + config.get("base")
                 + " "                     + config.get("command");

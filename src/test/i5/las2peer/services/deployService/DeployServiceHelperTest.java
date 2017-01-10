@@ -18,6 +18,7 @@ import java.lang.reflect.Field;
 import java.net.Socket;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.sql.ResultSet;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -30,7 +31,16 @@ import static org.junit.Assert.*;
 public class DeployServiceHelperTest {
     static Logger l = LoggerFactory.getLogger("");
 
-    private DockerHelper dh = new DockerHelper();
+    private DockerHelper dh;
+
+    @BeforeClass
+    public static void setup() throws IOException {
+        new DockerHelper().removeAllContainers();
+    }
+
+    public DeployServiceHelperTest() throws IOException {
+        dh = new DockerHelper();
+    }
 
     private DatabaseManager getMock(int testNumber) {
         return new DatabaseManager(
