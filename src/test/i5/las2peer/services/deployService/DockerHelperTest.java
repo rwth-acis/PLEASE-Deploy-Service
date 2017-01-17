@@ -26,7 +26,7 @@ public class DockerHelperTest {
     @BeforeClass
     public static void setup() throws IOException {
         DockerHelper.removeAllContainers();
-        dh = new DockerHelper(classHash, "fc00:"+classHash+"::/32");
+        dh = new DockerHelper(classHash, "fc00:"+classHash+"::/64");
     }
 
     private Map<String, Object> getConfig(int cpu, int memory, int disk, String base, String command) {
@@ -41,7 +41,7 @@ public class DockerHelperTest {
 
     @Test
     public void startContainer() throws Exception {
-        Map<String, Object> config = getConfig(512, 100_000_000, 220_000_000, "busybox", "echo \"hello world!\"");
+        Map<String, Object> config = getConfig(512, 100_000_000, 220_000_000, "busybox", "echo \"hello world\"");
         String cid = dh.startContainer(config);
         assertTrue("<"+cid+"> is not valid container id", cid.matches("[0-9a-f]{15,}+"));
     }

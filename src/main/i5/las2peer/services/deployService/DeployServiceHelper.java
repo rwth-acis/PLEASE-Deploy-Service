@@ -7,16 +7,12 @@ import javax.json.*;
 import javax.json.stream.JsonGenerator;
 import javax.ws.rs.core.Response;
 import javax.xml.crypto.Data;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.StringReader;
-import java.io.UnsupportedEncodingException;
+import java.io.*;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Created by adabru on 26.12.16.
@@ -26,10 +22,9 @@ public class DeployServiceHelper {
 
     private DockerHelper dh;
     private DatabaseManager dm;
-    private AppMetadataHelper amh;
 
-    public DeployServiceHelper(DockerHelper dh, DatabaseManager dm, AppMetadataHelper amh) {
-        this.dh = dh; this.dm = dm; this.amh = amh;
+    public DeployServiceHelper(DockerHelper dh, DatabaseManager dm) {
+        this.dh = dh; this.dm = dm;
     }
 
     private Map<String,Object> guardedConfig(Map<String,Object> orig) {
@@ -74,15 +69,16 @@ public class DeployServiceHelper {
         return Response.serverError().build();
     }
 
-    public Response buildApp(int app, String version) {
+    public Response buildApp(Map<String, Object> config) {
         try {
-            Map<String, Object> build = (Map<String, Object>) amh.getApp(app).get("build");
-            String build_base = (String) build.get("base");
-            String build_full = (String) build.get("full");
-            // init + inc
+            int app = (int) config.get("app");
+            String version = (String) config.get("version");
+            String build_full = (String) config.get("full");
+            String base = (String) config.get("base");
+            // TODO init + inc
 
             Map<String, Object> docker_config = new HashMap<>();
-            docker_config.put("base", build_base);
+            docker_config.put("base", base);
             docker_config.put("command", build_full);
             docker_config = guardedConfig(docker_config);
 
@@ -95,6 +91,14 @@ public class DeployServiceHelper {
             e.printStackTrace();
         }
         return Response.serverError().build();
+    }
+
+    public boolean waitForBuild(int app, String version) throws SQLException, IOException {
+        ResultSet rs = dm.query("SELECT cid FROM build_containers WHERE app=? AND version=?", app, version);
+        if (!rs.next())
+            throw new IllegalArgumentException("no build exists for app "+app+" with version "+version);
+        String cid = rs.getString("cid");
+        return dh.waitContainer(cid) == 0;
     }
 
     public Response deployApp(Map<String, Object> config) throws SQLException, IOException {
@@ -137,13 +141,13 @@ public class DeployServiceHelper {
     }
 
     public String updateApp(String cid_old, String cid_new) throws IOException {
+        // TODO
         // get ip
         // start new
         dh.updateContainer(cid_old, cid_new);
         // free ip
         return "yolo";
     }
-
 
     public static JsonStructure stringToJson(String s) {
         JsonReader jr = Json.createReader(new StringReader(s));

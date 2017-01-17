@@ -4,9 +4,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Scanner;
+import java.io.InputStream;
+import java.util.*;
 
 /**
  * Created by adabru on 27.12.16.
@@ -15,6 +14,7 @@ public class DockerHelper {
     private static Logger l = LoggerFactory.getLogger(DockerHelper.class.getName());
     private IpPool ips;
     private String network;
+    private boolean addBridge = false;
 
     public DockerHelper() throws IOException { this("please"); }
     public DockerHelper(String network) throws IOException { this(network, null); }
@@ -36,6 +36,7 @@ public class DockerHelper {
             executeProcess("docker network create --driver=bridge --ipv6 --subnet=" + subnet + " --ip-range=" + subnet + " --gateway=" + ips.allocIp() + " " + network);
         }
     }
+    public void setAddBridge(boolean newValue) { addBridge = newValue; }
 
     public static String executeProcess(String shellcommand) throws IOException {
         String errOut=null, stdOut=null;
@@ -60,16 +61,22 @@ public class DockerHelper {
                 (key, value) -> env.append(" -e "+key+"=\""+value.replaceAll("\"", "\\\"")+"\"")
         );
 
-        String dockercmd = "docker run -d"
+        String command = "sh -c \"" + ((String)config.get("command")).replaceAll("\\\\","\\\\\\\\").replaceAll("\"","\\\\\"").replaceAll("\\$","\\\\\\$") + "\"";
+
+        String dockercmd = "docker create"
                 + " --network="+network
                 + " --memory "            + config.get("memory")
                 + " --cpu-shares "        + config.get("cpu")
-                + " --storage-opt size="  + config.get("disk")
+//                + " --storage-opt size="  + config.get("disk")
                 + " --ip6="              + config.getOrDefault("ip6", ips.allocIp())
                 + env
                 + " "                     + config.get("base")
-                + " "                     + config.get("command");
-        return executeProcess(dockercmd).trim();
+                + " "                     + command;
+        String cid = executeProcess(dockercmd).trim();
+        if (addBridge)
+            executeProcess("docker network connect bridge "+cid);
+        executeProcess("docker start "+cid);
+        return cid;
     }
 
     public String getIp(String cid) throws IOException {
@@ -107,5 +114,9 @@ public class DockerHelper {
         l.info("removing all containers, may take a while…");
         executeProcess("docker unpause "+allContainers+" 2>/dev/null");
         executeProcess("docker rm -f "+allContainers);
+    }
+
+    public int waitContainer(String cid) throws IOException {
+        return Integer.parseInt(executeProcess("docker wait "+cid).trim());
     }
 }
