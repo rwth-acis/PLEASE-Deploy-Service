@@ -6,20 +6,21 @@ CREATE TABLE build_containers (
   `app` INT NOT NULL
 , `version` VARCHAR(255)
 , `cid` VARCHAR(255)
+, `iteration` INT AUTO_INCREMENT
 , `imageid` VARCHAR(255)
-, CONSTRAINT pk_build PRIMARY KEY (app,version)
+, CONSTRAINT pk_build PRIMARY KEY (app,version,iteration)
 );
 
 CREATE TABLE deployment_containers (
-  `ip6` VARCHAR(255) NOT NULL
+  `iid` INT(32) NOT NULL
 , `version` VARCHAR(255)
 , `cid` VARCHAR(255)
 , CONSTRAINT pk_deployc PRIMARY KEY (cid)
 );
 
 CREATE TABLE deployments (
-  `ip6` VARCHAR(255) NOT NULL
+  `iid` INT(32) NOT NULL
 , `app` INT NOT NULL
 , `cid` VARCHAR(255)
-, CONSTRAINT pk_deploy PRIMARY KEY (ip6)
+, CONSTRAINT pk_deploy PRIMARY KEY (iid)
 );

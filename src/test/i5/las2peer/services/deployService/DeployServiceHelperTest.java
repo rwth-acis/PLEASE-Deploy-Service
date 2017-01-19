@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import javax.json.Json;
 import javax.json.JsonObject;
 import javax.json.JsonReader;
+import javax.json.JsonStructure;
 import javax.ws.rs.core.Response;
 
 import java.io.*;
@@ -39,7 +40,7 @@ public class DeployServiceHelperTest {
     @BeforeClass
     public static void setup() throws IOException {
         DockerHelper.removeAllContainers();
-        dh = new DockerHelper(classHash, "fc00:"+classHash+"::/64");
+        dh = new DockerHelper(classHash, "fc00:"+classHash+"::");
     }
 
     private DatabaseManager getMock(int testNumber) {
@@ -61,16 +62,19 @@ public class DeployServiceHelperTest {
                 public void run() {
                     try {
                         DatagramChannel dc = null;
+                        InetSocketAddress isa = new InetSocketAddress(InetAddress.getByName(host), port);
+                        System.out.println(isa);
+                        dc = DatagramChannel.open();
+                        while (dc.getLocalAddress() == null)
+                            try { dc.bind(isa); }
+                            catch(BindException e) { }
                         l.info("logging udp on " + host + " " + port);
-                        dc = DatagramChannel.open().bind(
-                                new InetSocketAddress(InetAddress.getByName(host), port));
                         ByteBuffer bb = ByteBuffer.allocate(8192);
                         while (true) {
                             bb.clear();
                             dc.receive(bb);
                             bb.flip();
                             l.info(new String(bb.array(), 0, bb.remaining(), "utf8"));
-                            System.out.println();
                         }
                     } catch (IOException e) {
                         l.error(e.toString());
@@ -80,8 +84,15 @@ public class DeployServiceHelperTest {
             thUdp.start();
         }
     }
+    private static JsonStructure stringToJson(String s) {
+        JsonReader jr = Json.createReader(new StringReader(s));
+        JsonStructure js = jr.read();
+        jr.close();
 
-//    @Test
+        return js;
+    }
+
+    @Test
     public void getAllApps() {
         DeployServiceHelper dsh = new DeployServiceHelper(null, getMock(1));
         Response r = dsh.getAllApps();
@@ -89,7 +100,7 @@ public class DeployServiceHelperTest {
         assertEquals("[]", r.getEntity());
     }
 
-//    @Test
+    @Test
     public void buildApp() {
         DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(2));
 
@@ -105,14 +116,26 @@ public class DeployServiceHelperTest {
         assertEquals("[\"457\"]", r.getEntity());
     }
 
-//    @Test
+    @Test
     public void deployApp() throws Exception {
         DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(3));
-        Map<String, Object> deploy_config = new HashMap<>();
+        Map<String, Object> deploy_config;
+        Map<String, Object> build_config;
+        Response r;
+        JsonObject jo;
+
+        // build, deploy and test connection
+        build_config = new HashMap<>();
+            build_config.put("app", 456);
+            build_config.put("version", "v1");
+        r = dsh.buildApp(build_config);
+        assertEquals(200, r.getStatus());
+
+        deploy_config = new HashMap<>();
             deploy_config.put("app", 456);
             deploy_config.put("version", "v1");
             deploy_config.put("base", "busybox");
-            Map<String, Object> env = new HashMap<>();
+                Map<String, Object> env = new HashMap<>();
                 env.put("AA", "xx");
                 env.put("BB_B", "xx x");
             deploy_config.put("env", env);
@@ -121,15 +144,10 @@ public class DeployServiceHelperTest {
             // docker run     nc -l -p 5000 -e sh -c •"printf •\•"hi•\•\n•\$AA•\•\n•\${BB_B}•\•"•"
             String command = "nc -l -p 5000 -e sh -c \"printf \\\"hi\\\\n\\$AA\\\\n\\${BB_B}\\\"\"";
             deploy_config.put("command", command);
-
-        Response r;
-
-        // deploy and test connection
         r = dsh.deployApp(deploy_config);
         assertEquals(201, r.getStatus());
-        String ip6 = new URI(r.getHeaderString("location")).getHost().replaceAll("[\\[\\]]","");
-        assertTrue("Must be ip6: <"+ip6+">", ip6.matches("[0-9a-f:]{3,}+"));
-        Socket s = new Socket(ip6, 5000);
+        jo = (JsonObject) stringToJson(r.getEntity().toString());
+        Socket s = new Socket(jo.getString("ip6"), 5000);
         BufferedReader br = new BufferedReader(new InputStreamReader(s.getInputStream()));
         assertEquals("hi", br.readLine());
         assertEquals("xx", br.readLine());
@@ -139,7 +157,7 @@ public class DeployServiceHelperTest {
         assertEquals("[\"456\"]", r.getEntity());
 
         // build and deploy from build
-        Map<String, Object> build_config = new HashMap<>();
+        build_config = new HashMap<>();
             build_config.put("app", 777);
             build_config.put("version", "v2.0");
             build_config.put("base", "busybox");
@@ -156,18 +174,60 @@ public class DeployServiceHelperTest {
         deploy_config.put("version", "v2.0");
         r = dsh.deployApp(deploy_config);
         assertEquals(201, r.getStatus());
-        ip6 = new URI(r.getHeaderString("location")).getHost().replaceAll("[\\[\\]]","");
-        assertTrue("Must be ip6: <"+ip6+">", ip6.matches("[0-9a-f:]{3,}+"));
-        s = new Socket(ip6, 5000);
+        jo = (JsonObject) stringToJson(r.getEntity().toString());
+        s = new Socket(jo.getString("ip6"), 5000);
         br = new BufferedReader(new InputStreamReader(s.getInputStream()));
         assertEquals("apple", br.readLine());
     }
 
-    // test is a sample and takes too long for including in regular test
     @Test
-    public void samples() throws Exception {
+    public void updateApp() throws Exception {
         DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(4));
         Response r;
+        Map<String, Object> deploy_config;
+        Map<String, Object> build_config;
+
+        // build two versions
+        build_config = new HashMap<>();
+            build_config.put("app", 4);
+            build_config.put("version", "v1");
+            build_config.put("full", "echo 111 > somefile");
+        assertEquals(200, dsh.buildApp(build_config).getStatus());
+        build_config = new HashMap<>();
+            build_config.put("app", 4);
+            build_config.put("version", "v2");
+            build_config.put("full", "echo 222 > somefile");
+        assertEquals(200, dsh.buildApp(build_config).getStatus());
+
+        // deploy first version
+        deploy_config = new HashMap<>();
+            deploy_config.put("app", 4);
+            deploy_config.put("version", "v1");
+            deploy_config.put("base", "build");
+            deploy_config.put("command", "nc -ll -p 5000 -e cat somefile");
+        r = dsh.deployApp(deploy_config);
+        assertEquals(201, r.getStatus());
+        JsonObject jo = (JsonObject) stringToJson(r.getEntity().toString());
+        Socket s = new Socket(jo.getString("ip6"), 5000);
+        BufferedReader br = new BufferedReader(new InputStreamReader(s.getInputStream()));
+        assertEquals("111", br.readLine());
+
+        // update to second version
+            deploy_config.put("version", "v2");
+        r = dsh.updateApp(jo.getInt("iid"), "v2", deploy_config);
+        assertEquals(200, r.getStatus());
+        s = new Socket(jo.getString("ip6"), 5000);
+        br = new BufferedReader(new InputStreamReader(s.getInputStream()));
+        assertEquals("222", br.readLine());
+    }
+
+    // test is a sample and takes too long for including in regular test
+//    @Test
+    public void samples() throws Exception {
+        // TODO move to curl test
+        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(4));
+        Response r;
+        logUdp("fc00:"+classHash+"::1", 9999);
         // this build requires active internet connection
         dh.setAddBridge(true);
         Map<String, Object> build_config = new HashMap<>();
@@ -185,7 +245,6 @@ public class DeployServiceHelperTest {
             deploy_config.put("base", "build");
             deploy_config.put("command", "cd PLEASE-sample1 && httpd -f");
         l.info("waiting for build...");
-//        logUdp("fc00:"+classHash+"::1", 9999);
         assertTrue("Build must be successful!", dsh.waitForBuild(101, "v0.1"));
         l.info("build finished!");
         r = dsh.deployApp(deploy_config);
@@ -197,10 +256,4 @@ public class DeployServiceHelperTest {
         assertTrue("Answer is zero length!", answer.length() > 0);
         l.info("first sample returned: \n"+answer);
     }
-
-//    @Test
-//    public void testudp() throws IOException, InterruptedException {
-//        logUdp("fc00:"+classHash+"::1", 9999);
-//        Thread.sleep(300000);
-//    }
 }

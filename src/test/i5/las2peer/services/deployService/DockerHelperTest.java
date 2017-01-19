@@ -26,7 +26,7 @@ public class DockerHelperTest {
     @BeforeClass
     public static void setup() throws IOException {
         DockerHelper.removeAllContainers();
-        dh = new DockerHelper(classHash, "fc00:"+classHash+"::/64");
+        dh = new DockerHelper(classHash, "fc00:"+classHash+"::");
     }
 
     private Map<String, Object> getConfig(int cpu, int memory, int disk, String base, String command) {
