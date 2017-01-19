@@ -41,6 +41,7 @@ public class IpPool {
         throw new IllegalStateException("ip addresses exhausted");
     }
     public boolean freeIp(String ip6) throws UnknownHostException {
+        if (ip6 == null) return false;
         byte[] b = InetAddress.getByName(ip6).getAddress();
         int i = ((b[12]&0xff)<<24)|((b[13]&0xff)<<16)|((b[14]&0xff)<<8)|((b[15]&0xff)<<0);
         return allocated.remove(i);

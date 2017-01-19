@@ -1,6 +1,7 @@
 package i5.las2peer.services.deployService;
 
 import com.sun.org.apache.xalan.internal.xsltc.compiler.util.MultiHashtable;
+import jdk.nashorn.api.scripting.JSObject;
 import org.hamcrest.Description;
 import org.hamcrest.TypeSafeMatcher;
 import org.junit.BeforeClass;
@@ -8,10 +9,7 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.json.Json;
-import javax.json.JsonObject;
-import javax.json.JsonReader;
-import javax.json.JsonStructure;
+import javax.json.*;
 import javax.ws.rs.core.Response;
 
 import java.io.*;
@@ -84,7 +82,7 @@ public class DeployServiceHelperTest {
             thUdp.start();
         }
     }
-    private static JsonStructure stringToJson(String s) {
+    public static JsonStructure toJson(String s) {
         JsonReader jr = Json.createReader(new StringReader(s));
         JsonStructure js = jr.read();
         jr.close();
@@ -93,27 +91,35 @@ public class DeployServiceHelperTest {
     }
 
     @Test
-    public void getAllApps() {
-        DeployServiceHelper dsh = new DeployServiceHelper(null, getMock(1));
-        Response r = dsh.getAllApps();
-        assertEquals(200, r.getStatus());
-        assertEquals("[]", r.getEntity());
-    }
-
-    @Test
     public void buildApp() {
         DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(2));
 
         Map<String, Object> build_config = new HashMap<>();
             build_config.put("app", 457);
-            build_config.put("version", "v1.2.3");
-            build_config.put("base", "busybox");
-            build_config.put("full", "echo hi");
+            build_config.put("version", "v1");
         Response r = dsh.buildApp(build_config);
         assertEquals(200, r.getStatus());
-        r = dsh.getAllApps();
+        r = dsh.buildApp(build_config);
         assertEquals(200, r.getStatus());
-        assertEquals("[\"457\"]", r.getEntity());
+            build_config.put("version", "v2");
+        r = dsh.buildApp(build_config);
+        assertEquals(200, r.getStatus());
+            build_config.put("app", 458);
+            build_config.put("version", "v1");
+        r = dsh.buildApp(build_config);
+        assertEquals(200, r.getStatus());
+        r = dsh.getBuild(null, null, null);
+        assertEquals(200, r.getStatus());
+        assertEquals(toJson("{\"457\":{\"v1\":[0,1],\"v2\":[0]},\"458\":{\"v1\":[0]}}")
+            , toJson(r.getEntity().toString()));
+        r = dsh.getBuild(457, null, null);
+        assertEquals(200, r.getStatus());
+        assertEquals(toJson("{\"457\":{\"v1\":[0,1],\"v2\":[0]}}")
+            , toJson(r.getEntity().toString()));
+        r = dsh.getBuild(457, "v1", null);
+        assertEquals(200, r.getStatus());
+        assertEquals(toJson("{\"457\":{\"v1\":[0,1]}}")
+            , toJson(r.getEntity().toString()));
     }
 
     @Test
@@ -128,8 +134,7 @@ public class DeployServiceHelperTest {
         build_config = new HashMap<>();
             build_config.put("app", 456);
             build_config.put("version", "v1");
-        r = dsh.buildApp(build_config);
-        assertEquals(200, r.getStatus());
+        assertEquals(200, dsh.buildApp(build_config).getStatus());
 
         deploy_config = new HashMap<>();
             deploy_config.put("app", 456);
@@ -146,15 +151,18 @@ public class DeployServiceHelperTest {
             deploy_config.put("command", command);
         r = dsh.deployApp(deploy_config);
         assertEquals(201, r.getStatus());
-        jo = (JsonObject) stringToJson(r.getEntity().toString());
+        jo = (JsonObject) toJson(r.getEntity().toString());
+        assertTrue("Response must include iid", jo.getInt("iid",-1) != -1);
+        assertTrue("Must be ip6: <"+jo.getString("ip6")+">", jo.getString("ip6").matches("[0-9a-f:]{3,}+"));
         Socket s = new Socket(jo.getString("ip6"), 5000);
         BufferedReader br = new BufferedReader(new InputStreamReader(s.getInputStream()));
         assertEquals("hi", br.readLine());
         assertEquals("xx", br.readLine());
         assertEquals("xx x", br.readLine());
-        r = dsh.getAllApps();
+        r = dsh.getDeployments(null);
         assertEquals(200, r.getStatus());
-        assertEquals("[\"456\"]", r.getEntity());
+        assertTrue("must match {\"456\":\\[[0-9]*\\]}"
+            , toJson(r.getEntity().toString()).toString().matches("^\\{\"456\":\\[[0-9]*\\]\\}"));
 
         // build and deploy from build
         build_config = new HashMap<>();
@@ -174,7 +182,7 @@ public class DeployServiceHelperTest {
         deploy_config.put("version", "v2.0");
         r = dsh.deployApp(deploy_config);
         assertEquals(201, r.getStatus());
-        jo = (JsonObject) stringToJson(r.getEntity().toString());
+        jo = (JsonObject) toJson(r.getEntity().toString());
         s = new Socket(jo.getString("ip6"), 5000);
         br = new BufferedReader(new InputStreamReader(s.getInputStream()));
         assertEquals("apple", br.readLine());
@@ -207,18 +215,50 @@ public class DeployServiceHelperTest {
             deploy_config.put("command", "nc -ll -p 5000 -e cat somefile");
         r = dsh.deployApp(deploy_config);
         assertEquals(201, r.getStatus());
-        JsonObject jo = (JsonObject) stringToJson(r.getEntity().toString());
+        JsonObject jo = (JsonObject) toJson(r.getEntity().toString());
         Socket s = new Socket(jo.getString("ip6"), 5000);
         BufferedReader br = new BufferedReader(new InputStreamReader(s.getInputStream()));
         assertEquals("111", br.readLine());
 
         // update to second version
             deploy_config.put("version", "v2");
-        r = dsh.updateApp(jo.getInt("iid"), "v2", deploy_config);
+        r = dsh.updateApp(jo.getInt("iid"), deploy_config);
         assertEquals(200, r.getStatus());
         s = new Socket(jo.getString("ip6"), 5000);
         br = new BufferedReader(new InputStreamReader(s.getInputStream()));
         assertEquals("222", br.readLine());
+    }
+
+    @Test
+    public void undeploy() {
+        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(5));
+        Response r;
+
+        Map<String, Object> build_config = new HashMap<>();
+            build_config.put("app", 457);
+            build_config.put("version", "v1");
+        assertEquals(200, dsh.buildApp(build_config).getStatus());
+            build_config.put("version", "v2");
+        assertEquals(200, dsh.buildApp(build_config).getStatus());
+        Map<String, Object> deploy_config = new HashMap<>();
+            deploy_config.put("app", 457);
+            deploy_config.put("version", "v1");
+            deploy_config.put("command", "sleep 10m");
+        r = dsh.deployApp(deploy_config);
+        assertEquals(201, r.getStatus());
+        int iid1 = ((JsonObject)toJson(r.getEntity().toString())).getInt("iid");
+        r = dsh.deployApp(deploy_config);
+        assertEquals(201, r.getStatus());
+        int iid2 = ((JsonObject)toJson(r.getEntity().toString())).getInt("iid");
+        assertNotEquals(iid1, iid2);
+            deploy_config.put("version", "v2");
+        assertEquals(200, dsh.updateApp(iid1, deploy_config).getStatus());
+        assertEquals(200, dsh.undeploy(iid1).getStatus());
+        r = dsh.getDeployments(null);
+        assertEquals(200, r.getStatus());
+        JsonObject deployments = (JsonObject) toJson(r.getEntity().toString());
+        assertTrue(((JsonArray)deployments.get("457")).size() == 1);
+        assertTrue(((JsonArray)deployments.get("457")).getInt(0) == iid2);
     }
 
     // test is a sample and takes too long for including in regular test

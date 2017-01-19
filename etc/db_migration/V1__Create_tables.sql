@@ -6,7 +6,7 @@ CREATE TABLE build_containers (
   `app` INT NOT NULL
 , `version` VARCHAR(255)
 , `cid` VARCHAR(255)
-, `iteration` INT AUTO_INCREMENT
+, `iteration` INT
 , `imageid` VARCHAR(255)
 , CONSTRAINT pk_build PRIMARY KEY (app,version,iteration)
 );

@@ -77,4 +77,20 @@ public class DockerHelperTest {
                 dh.executeProcess("nc "+ip6+" 4444").trim());
         assertEquals(ip6, dh.getIp(cid1));
     }
+
+    @Test
+    public void removeContainer() throws IOException {
+        Map<String, Object> config = getConfig(512, 100_000_000, 220_000_000, "busybox", "sleep 10m");
+
+        String cid1 = dh.startContainer(config);
+        String ip6_1 = dh.getIp(cid1);
+        assertTrue("<"+ip6_1+"> is not valid ip6 address", ip6_1.matches("[0-9a-f:]{3,}+"));
+        String cid2 = dh.startContainer(config);
+        String ip6_2 = dh.getIp(cid2);
+        assertNotEquals(ip6_1, ip6_2);
+        dh.removeContainer(cid1);
+        String cid3 = dh.startContainer(config);
+        String ip6_3 = dh.getIp(cid3);
+        assertEquals(ip6_1, ip6_3);
+    }
 }

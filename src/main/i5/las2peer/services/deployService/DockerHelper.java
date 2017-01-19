@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -90,7 +91,8 @@ public class DockerHelper {
 
     public String getIp(String cid) throws IOException {
         String ip6 = executeProcess("docker inspect --format='{{.NetworkSettings.Networks."+network+".GlobalIPv6Address}}' "+cid).trim();
-        assert ip6.matches("[0-9a-f:]{3,}+");
+        if (ip6.equals("<no value>")) ip6 = null;
+        assert ip6 == null || ip6.matches("[0-9a-f:]{3,}+") : "ip must be null or valid, but is: "+ip6;
         return ip6;
     }
 
@@ -133,5 +135,12 @@ public class DockerHelper {
 
     public int waitContainer(String cid) throws IOException {
         return Integer.parseInt(executeProcess("docker wait "+cid).trim());
+    }
+
+    public void removeContainer(String cid) throws IOException {
+        try { ips.freeIp(getIp(cid)); }
+        catch (UnknownHostException e) {}
+        executeProcess("docker unpause "+cid);
+        executeProcess("docker rm -f "+cid);
     }
 }

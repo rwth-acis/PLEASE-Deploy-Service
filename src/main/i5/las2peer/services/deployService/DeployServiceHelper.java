@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.json.*;
 import javax.json.stream.JsonGenerator;
+import javax.print.URIException;
 import javax.ws.rs.core.Response;
 import javax.xml.crypto.Data;
 import java.io.*;
@@ -25,6 +26,7 @@ public class DeployServiceHelper {
 
     public DeployServiceHelper(DockerHelper dh, DatabaseManager dm) {
         this.dh = dh; this.dm = dm;
+        // TODO dm.restore(); + check all cids, imageids and iids with docker daemon
     }
 
     private Map<String,Object> guardedConfig(Map<String,Object> orig) {
@@ -51,20 +53,91 @@ public class DeployServiceHelper {
         return config;
     }
 
-    public Response getAllApps() {
+    // {
+    //   "7": [449845, 64981, 98],
+    //   "13": [498, 0],
+    //    _
+    // }
+    public Response getDeployments(Integer app) {
+        // TODO implement userOnly
         try {
-            ResultSet rs = dm.query("SELECT app FROM build_containers UNION SELECT app FROM deployments");
+            ResultSet rs;
+            if (app == null)
+                rs = dm.query("SELECT * FROM deployments ORDER BY app");
+            else
+                rs = dm.query("SELECT * FROM deployments WHERE app=?", app);
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             JsonGenerator jg = Json.createGenerator(baos);
-            jg.writeStartArray();
-            while (rs.next())
-                jg.write(rs.getString(1));
-            jg.writeEnd().close();
+            long curApp = Long.MAX_VALUE;
+            jg.writeStartObject();
+            while (rs.next()) {
+                if (curApp != rs.getInt("app")) {
+                    if (curApp != Long.MAX_VALUE)
+                        jg.writeEnd();
+                    curApp = rs.getInt("app");
+                    jg.writeStartArray(String.valueOf(curApp));
+                }
+                jg.write(rs.getInt("iid"));
+            }
+            jg.writeEnd().writeEnd().close();
             return Response.ok().entity(baos.toString("utf8")).build();
-        } catch (SQLException e) {
-            e.printStackTrace();
-        } catch (UnsupportedEncodingException e) {
-            e.printStackTrace();
+        } catch (SQLException | UnsupportedEncodingException e) {
+            l.error(e.toString());
+        }
+        return Response.serverError().build();
+    }
+
+    // {
+    //   "7": {
+    //      "v1": [0,1,2],
+    //      "v2": [0,1]
+    //   },
+    //   "8": { …
+    //   }
+    // }
+    public Response getBuild(Integer app, String version, Integer iteration) {
+        // TODO implement userOnly
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            JsonGenerator jg = Json.createGenerator(baos);
+            ResultSet rs;
+            final long lnull = Long.MAX_VALUE;
+            if (app == null) {
+                rs = dm.query("SELECT * FROM build_containers ORDER BY app,version,iteration");
+            } else if (version == null) {
+                rs = dm.query("SELECT * FROM build_containers WHERE app=? ORDER BY app,version,iteration", app);
+            } else if (iteration == null) {
+                rs = dm.query("SELECT * FROM build_containers WHERE app=? AND version=? ORDER BY app,version,iteration", app, version);
+            } else {
+                rs = dm.query("SELECT * FROM build_containers WHERE app=? AND version=? AND iteration=?", app, version, iteration);
+                jg.writeStartObject();
+                jg.write("ip6", dh.getIp(rs.getString("cid")));
+                jg.writeEnd().close();
+                return Response.ok().entity(baos.toString("utf8")).build();
+            }
+            long curApp = lnull;
+            String curVersion = null;
+            jg.writeStartObject();
+            while (rs.next()) {
+                if (curApp != rs.getInt("app")) {
+                    if (curApp != lnull)
+                        jg.writeEnd().writeEnd();
+                    curApp = rs.getInt("app");
+                    curVersion = null;
+                    jg.writeStartObject(String.valueOf(curApp));
+                }
+                if (!rs.getString("version").equals(curVersion)) {
+                    if (curVersion != null)
+                        jg.writeEnd();
+                    curVersion = rs.getString("version");
+                    jg.writeStartArray(curVersion);
+                }
+                jg.write(rs.getInt("iteration"));
+            }
+            jg.writeEnd().writeEnd().writeEnd().close();
+            return Response.ok(baos.toString("utf8")).build();
+        } catch (SQLException | IOException e) {
+            l.error(e.toString());
         }
         return Response.serverError().build();
     }
@@ -85,12 +158,12 @@ public class DeployServiceHelper {
             docker_config = guardedConfig(docker_config);
 
             String cid = dh.startContainer(docker_config);
-            dm.update("INSERT INTO build_containers VALUES (?, ?, ?, NULL, NULL)", app, version, cid);
+            ResultSet rs = dm.query("SELECT COUNT(*) AS c FROM build_containers WHERE app=? AND version=?", app, version);
+            rs.next();
+            dm.update("INSERT INTO build_containers VALUES (?, ?, ?, ?, NULL)", app, version, cid, rs.getInt("c"));
             return Response.ok().build();
-        } catch (SQLException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
+        } catch (SQLException | IOException e) {
+            l.error(e.toString());
         }
         return Response.serverError().build();
     }
@@ -107,30 +180,31 @@ public class DeployServiceHelper {
         config.putIfAbsent("command", "");
         config.putIfAbsent("env", new HashMap<>());
     }
-    public Response deployApp(Map<String, Object> config) throws SQLException, IOException {
+    public Response deployApp(Map<String, Object> config) {
         int app = (int) config.get("app");
         String version = (String) config.get("version");
         setDeployDefaults(config);
 
-        ResultSet rs = dm.query("SELECT * FROM build_containers WHERE app=? AND version=?", app, version);
-        if (!rs.next())
-            return Response.status(404).entity("No build found for given app and version!").build();
-
-        String base = (String) config.get("base");
-        if (base.equals("build")) {
-            String imageid = rs.getString("imageid");
-            if (imageid == null) {
-                imageid = dh.commitContainer(rs.getString("cid"));
-                dm.update("UPDATE build_containers SET imageid=? WHERE app=? AND version=?", imageid, app, version);
-            }
-            base = imageid;
-        }
-
-        Map<String, Object> container_config = new HashMap<>();
-            container_config.put("base", base);
-            container_config.put("command", config.get("command"));
-            container_config.put("env", config.get("env"));
         try {
+            ResultSet rs = dm.query("SELECT * FROM build_containers WHERE app=? AND version=?", app, version);
+            if (!rs.next())
+                return Response.status(404).entity("No build found for given app and version!").build();
+
+            String base = (String) config.get("base");
+            if (base.equals("build")) {
+                String imageid = rs.getString("imageid");
+                if (imageid == null) {
+                    imageid = dh.commitContainer(rs.getString("cid"));
+                    dm.update("UPDATE build_containers SET imageid=? WHERE app=? AND version=?", imageid, app, version);
+                }
+                base = imageid;
+            }
+
+            Map<String, Object> container_config = new HashMap<>();
+                container_config.put("base", base);
+                container_config.put("command", config.get("command"));
+                container_config.put("env", config.get("env"));
+
             String cid = dh.startContainer(guardedConfig(container_config));
             int iid = dh.getIid(cid);
             dm.update("INSERT INTO deployment_containers VALUES (?,?,?)", iid, version, cid);
@@ -138,53 +212,62 @@ public class DeployServiceHelper {
             return Response.created(new URI("http://deployed/"+iid)).entity(
                 "{\"iid\":"+iid+", \"ip6\":\""+dh.getIp(cid)+"\"}"
             ).build();
-        } catch (IOException e) {
-            l.error(e.toString());
-        } catch (SQLException e) {
-            l.error(e.toString());
-        } catch (URISyntaxException e) {
+        } catch (IOException | SQLException | URISyntaxException e) {
             l.error(e.toString());
         }
         return Response.serverError().build();
     }
 
-    public Response updateApp(int iid, String version, Map<String, Object> config) throws IOException, SQLException {
+    public Response updateApp(int iid, Map<String, Object> config) {
         // TODO after rollback deadline: docker rm -f cid_old
         setDeployDefaults(config);
 
-        ResultSet rs = dm.query("SELECT * FROM deployments WHERE iid=?", iid);
-        if (!rs.next())
-            return Response.status(404).entity("No deployment found with interface id "+iid+"!").build();
-        String cid_old = rs.getString("cid");
-
-        rs = dm.query("SELECT * FROM build_containers WHERE app=? AND version=?", rs.getInt("app"), version);
-        if (!rs.next())
-            return Response.status(404).entity("No build found for given app and version!").build();
-
-        String base = (String) config.get("base");
-        if (base.equals("build")) {
-            String imageid = rs.getString("imageid");
-            if (imageid == null) {
-                imageid = dh.commitContainer(rs.getString("cid"));
-                dm.update("UPDATE build_containers SET imageid=? WHERE cid=?", imageid, rs.getString("cid"));
-            }
-            base = imageid;
-        }
-
-        // start new
-        Map<String, Object> container_config = new HashMap<>();
-            container_config.put("base", base);
-            container_config.put("command", config.get("command"));
-            container_config.put("env", config.get("env"));
         try {
+            ResultSet rs = dm.query("SELECT * FROM deployments WHERE iid=?", iid);
+            if (!rs.next())
+                return Response.status(404).entity("No deployment found with interface id "+iid+"!").build();
+            String cid_old = rs.getString("cid");
+
+            rs = dm.query("SELECT * FROM build_containers WHERE app=? AND version=?", rs.getInt("app"), config.get("version"));
+            if (!rs.next())
+                return Response.status(404).entity("No build found for given app and version!").build();
+
+            String base = (String) config.get("base");
+            if (base.equals("build")) {
+                String imageid = rs.getString("imageid");
+                if (imageid == null) {
+                    imageid = dh.commitContainer(rs.getString("cid"));
+                    dm.update("UPDATE build_containers SET imageid=? WHERE cid=?", imageid, rs.getString("cid"));
+                }
+                base = imageid;
+            }
+
+            // start new
+            Map<String, Object> container_config = new HashMap<>();
+                container_config.put("base", base);
+                container_config.put("command", config.get("command"));
+                container_config.put("env", config.get("env"));
+
             String cid_new = dh.startContainer(guardedConfig(container_config));
             dh.updateContainer(cid_old, cid_new);
-            dm.update("INSERT INTO deployment_containers VALUES (?,?,?)", iid, version, cid_new);
+            dm.update("INSERT INTO deployment_containers VALUES (?,?,?)", iid, config.get("version"), cid_new);
             dm.update("UPDATE deployments SET cid=? WHERE iid=?", cid_new, iid);
             return Response.ok().build();
-        } catch (IOException e) {
+        } catch (IOException | SQLException e) {
             l.error(e.toString());
-        } catch (SQLException e) {
+        }
+        return Response.serverError().build();
+    }
+
+    public Response undeploy(int iid) {
+        try {
+            dm.update("DELETE FROM deployments WHERE iid=?", iid);
+            ResultSet rs = dm.query("SELECT * FROM deployment_containers WHERE iid=?", iid);
+            while (rs.next())
+                dh.removeContainer(rs.getString("cid"));
+            dm.update("DELETE FROM deployment_containers WHERE iid=?", iid);
+            return Response.ok().build();
+        } catch (SQLException | IOException e) {
             l.error(e.toString());
         }
         return Response.serverError().build();
