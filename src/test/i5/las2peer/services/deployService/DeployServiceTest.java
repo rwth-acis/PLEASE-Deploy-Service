@@ -12,12 +12,20 @@ import i5.las2peer.webConnector.WebConnector;
 import i5.las2peer.webConnector.client.ClientResponse;
 import i5.las2peer.webConnector.client.MiniClient;
 
-import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
+import java.io.*;
+import java.net.Socket;
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
+
+import javax.json.Json;
+import javax.json.JsonObject;
+import javax.json.JsonReader;
+import javax.json.JsonStructure;
+import javax.ws.rs.client.ClientBuilder;
+import javax.ws.rs.core.MultivaluedMap;
+import javax.ws.rs.core.Response;
 
 /**
  * Example Test Class demonstrating a basic JUnit test structure.
@@ -34,8 +42,6 @@ public class DeployServiceTest {
 
 	private static UserAgent testAgent;
 	private static final String testPass = "adamspass";
-
-	private static final String mainPath = "deploy/";
 
 	/**
 	 * Called before the tests start.
@@ -95,50 +101,87 @@ public class DeployServiceTest {
 
 	}
 
-	/**
-	 * 
-	 * Tests the validation method.
-	 * 
-	 */
 	@Test
-	public void testGet() {
+	public void testApi() throws IOException {
+//		"\nGET    /deployed?app=7&my                  : show deployment information" +
+//				"\nPOST   /deployed                           : deploy an app" +
+//				"\nGET    /deployed/{iid}                     : show deployment with iid" +
+//				"\nPUT    /deployed/{iid}                     : update deployment with iid" +
+//				"\nDELETE /deployed/{iid}                     : delete deployment with iid" +
+//				"\n*      /deployed/{iid}/{port}              : forward requests to deployments" +
+//				"\nGET    /build?app=7&version=v1&iteration=5 : show build information" +
+//				"\nPOST   /build                              : start new build"
 		MiniClient c = new MiniClient();
 		c.setAddressPort(HTTP_ADDRESS, HTTP_PORT);
+		c.setLogin(Long.toString(testAgent.getId()), testPass);
+		ClientResponse res;
+		Socket s;
+		BufferedReader br;
 
-		try {
-			c.setLogin(Long.toString(testAgent.getId()), testPass);
-			ClientResponse result = c.sendRequest("GET", mainPath + "get", "");
-			assertEquals(200, result.getHttpCode());
-			assertTrue(result.getResponse().trim().contains("result")); // YOUR RESULT VALUE HERE
-			System.out.println("Result of 'testGet': " + result.getResponse().trim());
-		} catch (Exception e) {
-			e.printStackTrace();
-			fail("Exception: " + e);
-		}
+		// POST /build
+		res = c.sendRequest("POST", "deploy/build"
+			, "{\"app\":7, \"version\":\"v1\", \"full\":\"echo 111 > somefile\"}");
+		assertEquals(200, res.getHttpCode());
+		res = c.sendRequest("POST", "deploy/build"
+			, "{\"app\":7, \"version\":\"v2\", \"full\":\"echo 222 > somefile\"}");
+		assertEquals(200, res.getHttpCode());
 
-	}
+		// GET /build
+		res = c.sendRequest("GET", "deploy/build", "");
+		assertEquals(200, res.getHttpCode());
+		assertEquals(toJson("{\"7\":{\"v1\":[0],\"v2\":[0]}}")
+			, toJson(res.getResponse()));
 
-	/**
-	 * 
-	 * Test the example method that consumes one path parameter which we give the value "testInput" in this test.
-	 * 
-	 */
-	@Test
-	public void testPost() {
-		MiniClient c = new MiniClient();
+		// POST /deployed
+		res = c.sendRequest("POST", "deploy/deployed"
+			, "{\"app\":7, \"version\":\"v1\", \"base\":\"build\", \"command\":\"httpd -f\"}");
+		assertEquals(201, res.getHttpCode());
+		int iid = ((JsonObject)toJson(res.getResponse())).getInt("iid");
+		String ip6 = ((JsonObject)toJson(res.getResponse())).getString("ip6");
+		c.setAddressPort("http://["+ip6+"]", 80);
+		res = c.sendRequest("GET", "somefile", "");
+		assertEquals(200, res.getHttpCode());
+		assertEquals("111", res.getResponse().trim());
 		c.setAddressPort(HTTP_ADDRESS, HTTP_PORT);
 
-		try {
-			c.setLogin(Long.toString(testAgent.getId()), testPass);
-			ClientResponse result = c.sendRequest("POST", mainPath + "post/testInput", ""); // testInput is
-																							// the pathParam
-			assertEquals(200, result.getHttpCode());
-			assertTrue(result.getResponse().trim().contains("testInput")); // "testInput" name is part of response
-			System.out.println("Result of 'testPost': " + result.getResponse().trim());
-		} catch (Exception e) {
-			e.printStackTrace();
-			fail("Exception: " + e);
-		}
+		// GET /deployed/{iid}/{port}
+		res = c.sendRequest("GET", "deploy/deployed/"+iid+"/80/somefile", "");
+		assertEquals(200, res.getHttpCode());
+		assertEquals("111", res.getResponse().trim());
+
+		// PUT /deployed/{iid}
+		res = c.sendRequest("PUT", "deploy/deployed/"+iid
+				, "{\"app\":7, \"version\":\"v2\", \"base\":\"build\", \"command\":\"httpd -f\"}");
+		assertEquals(200, res.getHttpCode());
+		res = c.sendRequest("GET", "deploy/deployed/"+iid+"/80/somefile", "");
+		assertEquals(200, res.getHttpCode());
+		assertEquals("222", res.getResponse().trim());
+
+		// GET /deployed
+		res = c.sendRequest("GET", "deploy/deployed", "");
+		assertEquals(200, res.getHttpCode());
+		assertEquals(toJson("{\"7\":["+iid+"]}"), toJson(res.getResponse()));
+
+		// DELETE /deployed/{iid}
+		res = c.sendRequest("DELETE", "deploy/deployed/"+iid, "");
+		assertEquals(200, res.getHttpCode());
+		res = c.sendRequest("GET", "deploy/deployed", "");
+		assertEquals(200, res.getHttpCode());
+		assertEquals(toJson("{}"), toJson(res.getResponse()));
 	}
 
+	@Test
+	public void testLife() throws InterruptedException {
+		Response result = ClientBuilder.newClient()
+				.target(HTTP_ADDRESS+":"+HTTP_PORT+"/deploy").request().get();
+		assertEquals(200, result.getStatus());
+	}
+
+	public static JsonStructure toJson(String s) {
+		JsonReader jr = Json.createReader(new StringReader(s));
+		JsonStructure js = jr.read();
+		jr.close();
+
+		return js;
+	}
 }

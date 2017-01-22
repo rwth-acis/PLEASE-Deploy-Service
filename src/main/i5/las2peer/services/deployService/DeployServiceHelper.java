@@ -11,6 +11,7 @@ import javax.xml.crypto.Data;
 import java.io.*;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.UnknownHostException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.*;
@@ -79,7 +80,9 @@ public class DeployServiceHelper {
                 }
                 jg.write(rs.getInt("iid"));
             }
-            jg.writeEnd().writeEnd().close();
+            if (curApp != Long.MAX_VALUE)
+                jg.writeEnd();
+            jg.writeEnd().close();
             return Response.ok().entity(baos.toString("utf8")).build();
         } catch (SQLException | UnsupportedEncodingException e) {
             l.error(e.toString());
@@ -136,7 +139,7 @@ public class DeployServiceHelper {
             }
             jg.writeEnd().writeEnd().writeEnd().close();
             return Response.ok(baos.toString("utf8")).build();
-        } catch (SQLException | IOException e) {
+        } catch (SQLException | IOException | InterruptedException e) {
             l.error(e.toString());
         }
         return Response.serverError().build();
@@ -162,13 +165,13 @@ public class DeployServiceHelper {
             rs.next();
             dm.update("INSERT INTO build_containers VALUES (?, ?, ?, ?, NULL)", app, version, cid, rs.getInt("c"));
             return Response.ok().build();
-        } catch (SQLException | IOException e) {
+        } catch (SQLException | IOException | InterruptedException e) {
             l.error(e.toString());
         }
         return Response.serverError().build();
     }
 
-    public boolean waitForBuild(int app, String version) throws SQLException, IOException {
+    public boolean waitForBuild(int app, String version) throws SQLException, IOException, InterruptedException {
         ResultSet rs = dm.query("SELECT cid FROM build_containers WHERE app=? AND version=?", app, version);
         if (!rs.next())
             throw new IllegalArgumentException("no build exists for app "+app+" with version "+version);
@@ -212,7 +215,7 @@ public class DeployServiceHelper {
             return Response.created(new URI("http://deployed/"+iid)).entity(
                 "{\"iid\":"+iid+", \"ip6\":\""+dh.getIp(cid)+"\"}"
             ).build();
-        } catch (IOException | SQLException | URISyntaxException e) {
+        } catch (IOException | SQLException | URISyntaxException | InterruptedException e) {
             l.error(e.toString());
         }
         return Response.serverError().build();
@@ -253,7 +256,7 @@ public class DeployServiceHelper {
             dm.update("INSERT INTO deployment_containers VALUES (?,?,?)", iid, config.get("version"), cid_new);
             dm.update("UPDATE deployments SET cid=? WHERE iid=?", cid_new, iid);
             return Response.ok().build();
-        } catch (IOException | SQLException e) {
+        } catch (IOException | SQLException | InterruptedException e) {
             l.error(e.toString());
         }
         return Response.serverError().build();
@@ -267,9 +270,13 @@ public class DeployServiceHelper {
                 dh.removeContainer(rs.getString("cid"));
             dm.update("DELETE FROM deployment_containers WHERE iid=?", iid);
             return Response.ok().build();
-        } catch (SQLException | IOException e) {
+        } catch (SQLException | IOException | InterruptedException e) {
             l.error(e.toString());
         }
         return Response.serverError().build();
+    }
+
+    public String getIp(int iid) throws UnknownHostException {
+        return dh.getIpForIid(iid);
     }
 }

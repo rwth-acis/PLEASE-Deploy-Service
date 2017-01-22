@@ -36,7 +36,7 @@ public class DeployServiceHelperTest {
     static String classHash = String.format("%4x", DeployServiceHelperTest.class.getName().hashCode() & 65535);
 
     @BeforeClass
-    public static void setup() throws IOException {
+    public static void setup() throws Exception {
         DockerHelper.removeAllContainers();
         dh = new DockerHelper(classHash, "fc00:"+classHash+"::");
     }
@@ -51,7 +51,6 @@ public class DeployServiceHelperTest {
                 , "./database"
         );
     }
-
     static Thread thUdp = null;
     private static void logUdp(String host, int port) throws IOException {
         if (thUdp == null) {
@@ -88,6 +87,12 @@ public class DeployServiceHelperTest {
         jr.close();
 
         return js;
+    }
+    private String request(String ip6, int port) throws IOException {
+        Socket sock = new Socket(ip6, port);
+        Scanner s = new Scanner(sock.getInputStream()).useDelimiter("\\A");
+        String res = s.hasNext() ? s.next() : "";
+        return res;
     }
 
     @Test
@@ -144,21 +149,17 @@ public class DeployServiceHelperTest {
                 env.put("AA", "xx");
                 env.put("BB_B", "xx x");
             deploy_config.put("env", env);
-            // final                                   printf •••"hi•••\n••$AA•••\n••${BB_B}•••"
-            // in container   nc -l -p 5000 -e sh -c •"printf •\•"hi•\•\n••$AA•\•\n••${BB_B}•\•"•"
-            // docker run     nc -l -p 5000 -e sh -c •"printf •\•"hi•\•\n•\$AA•\•\n•\${BB_B}•\•"•"
-            String command = "nc -l -p 5000 -e sh -c \"printf \\\"hi\\\\n\\$AA\\\\n\\${BB_B}\\\"\"";
+            // final                                   printf •••"hi;••$AA;••${BB_B}•••"
+            // in container   nc -l -p 5000 -e sh -c •"printf •\•"hi;••$AA;••${BB_B}•\•"•"
+            // docker run     nc -l -p 5000 -e sh -c •"printf •\•"hi;•\$AA;•\${BB_B}•\•"•"
+            String command = "nc -l -p 5000 -e sh -c \"printf \\\"hi;\\$AA;\\${BB_B}\\\"\"";
             deploy_config.put("command", command);
         r = dsh.deployApp(deploy_config);
         assertEquals(201, r.getStatus());
         jo = (JsonObject) toJson(r.getEntity().toString());
         assertTrue("Response must include iid", jo.getInt("iid",-1) != -1);
         assertTrue("Must be ip6: <"+jo.getString("ip6")+">", jo.getString("ip6").matches("[0-9a-f:]{3,}+"));
-        Socket s = new Socket(jo.getString("ip6"), 5000);
-        BufferedReader br = new BufferedReader(new InputStreamReader(s.getInputStream()));
-        assertEquals("hi", br.readLine());
-        assertEquals("xx", br.readLine());
-        assertEquals("xx x", br.readLine());
+        assertEquals("hi;xx;xx x", request(jo.getString("ip6"), 5000));
         r = dsh.getDeployments(null);
         assertEquals(200, r.getStatus());
         assertTrue("must match {\"456\":\\[[0-9]*\\]}"
@@ -169,7 +170,7 @@ public class DeployServiceHelperTest {
             build_config.put("app", 777);
             build_config.put("version", "v2.0");
             build_config.put("base", "busybox");
-            build_config.put("full", "sh -c \"echo apple > ./somefile\"");
+            build_config.put("full", "sh -c \"printf apple > ./somefile\"");
         r = dsh.buildApp(build_config);
         assertEquals(200, r.getStatus());
         deploy_config = new HashMap<>();
@@ -183,9 +184,7 @@ public class DeployServiceHelperTest {
         r = dsh.deployApp(deploy_config);
         assertEquals(201, r.getStatus());
         jo = (JsonObject) toJson(r.getEntity().toString());
-        s = new Socket(jo.getString("ip6"), 5000);
-        br = new BufferedReader(new InputStreamReader(s.getInputStream()));
-        assertEquals("apple", br.readLine());
+        assertEquals("apple", request(jo.getString("ip6"), 5000));
     }
 
     @Test
@@ -199,12 +198,12 @@ public class DeployServiceHelperTest {
         build_config = new HashMap<>();
             build_config.put("app", 4);
             build_config.put("version", "v1");
-            build_config.put("full", "echo 111 > somefile");
+            build_config.put("full", "printf 111 > somefile");
         assertEquals(200, dsh.buildApp(build_config).getStatus());
         build_config = new HashMap<>();
             build_config.put("app", 4);
             build_config.put("version", "v2");
-            build_config.put("full", "echo 222 > somefile");
+            build_config.put("full", "printf 222 > somefile");
         assertEquals(200, dsh.buildApp(build_config).getStatus());
 
         // deploy first version
@@ -216,17 +215,13 @@ public class DeployServiceHelperTest {
         r = dsh.deployApp(deploy_config);
         assertEquals(201, r.getStatus());
         JsonObject jo = (JsonObject) toJson(r.getEntity().toString());
-        Socket s = new Socket(jo.getString("ip6"), 5000);
-        BufferedReader br = new BufferedReader(new InputStreamReader(s.getInputStream()));
-        assertEquals("111", br.readLine());
+        assertEquals("111", request(jo.getString("ip6"), 5000));
 
         // update to second version
             deploy_config.put("version", "v2");
         r = dsh.updateApp(jo.getInt("iid"), deploy_config);
         assertEquals(200, r.getStatus());
-        s = new Socket(jo.getString("ip6"), 5000);
-        br = new BufferedReader(new InputStreamReader(s.getInputStream()));
-        assertEquals("222", br.readLine());
+        assertEquals("222", request(jo.getString("ip6"), 5000));
     }
 
     @Test

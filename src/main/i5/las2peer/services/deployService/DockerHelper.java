@@ -3,6 +3,7 @@ package i5.las2peer.services.deployService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.ws.rs.Produces;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
@@ -20,14 +21,14 @@ public class DockerHelper {
     private String network;
     private boolean addBridge = false;
 
-    public DockerHelper() throws IOException { this("please"); }
-    public DockerHelper(String network) throws IOException { this(network, null); }
-    public DockerHelper(String network, String net_96) throws IOException {
+    public DockerHelper() throws IOException, InterruptedException { this("please"); }
+    public DockerHelper(String network) throws IOException, InterruptedException { this(network, null); }
+    public DockerHelper(String network, String net_96) throws IOException, InterruptedException {
         if (!network.matches("[a-zA-Z0-9]+"))
             throw new IllegalArgumentException("network name must be [a-zA-Z0-9]+ but is <"+network+">");
         this.network = network;
         if (net_96 == null) {
-            String subnet = executeProcess("docker network inspect "+network+" --format='{{with index .IPAM.Config 1}}{{.IPRange}}{{end}}'");
+            String subnet = executeProcess("docker network inspect "+network+" --format='{{with index .IPAM.Config 1}}{{.IPRange}}{{end}}'").stdout;
             Matcher matcher = Pattern.compile("[0-9a-f:]+/([0-9]+)").matcher(net_96);
             if (!matcher.find())
                 throw new IllegalArgumentException("network <"+network+"> causes problems");
@@ -48,23 +49,43 @@ public class DockerHelper {
     }
     public void setAddBridge(boolean newValue) { addBridge = newValue; }
 
-    public static String executeProcess(String shellcommand) throws IOException {
-        String errOut=null, stdOut=null;
+    public static class ProcessOutput {
+        String stdout, stderr;
+        int code;
+        public ProcessOutput(int code, String stdout, String stderr){this.code=code; this.stdout=stdout; this.stderr=stderr;}
+    }
+    private static class InputStreamAbsorber implements Runnable {
+        InputStream is;
+        String res;
+        public InputStreamAbsorber(InputStream is) {this.is = is;}
+        @Override
+        public void run() {
+            Scanner s = new Scanner(is).useDelimiter("\\A");
+            res = s.hasNext() ? s.next() : "";
+        }
+    }
+    public static ProcessOutput executeProcess(String shellcommand) throws IOException, InterruptedException {
         Process p = new ProcessBuilder("sh","-c",shellcommand).start();
         Scanner s;
-        s = new Scanner(p.getInputStream()).useDelimiter("\\A");
-        if (s.hasNext()) stdOut = s.next(); else stdOut = "";
-        s = new Scanner(p.getErrorStream()).useDelimiter("\\A");
-        if (s.hasNext()) errOut = s.next(); else errOut = "";
-        if (errOut.length() > 0) {
+        InputStreamAbsorber isa1 = new InputStreamAbsorber(p.getInputStream());
+        InputStreamAbsorber isa2 = new InputStreamAbsorber(p.getErrorStream());
+        Thread t1 = new Thread(isa1);
+        Thread t2 = new Thread(isa2);
+        t1.start(); t2.start();
+        int code = p.waitFor();
+        t1.join(); t2.join();
+        ProcessOutput res = new ProcessOutput(code, isa1.res, isa2.res);
+
+        if (res.stderr.length() > 0) {
             l.info(shellcommand);
-            l.warn(errOut);
+            l.warn(res.stderr);
         }
-        return stdOut;
+        if (res.code != 0) throw new IOException("Error exeucting <"+shellcommand+">:"+res.stderr);
+        return res;
     }
 
     // returns cid
-    public String startContainer(Map<String, Object> config) throws IOException {
+    public String startContainer(Map<String, Object> config) throws IOException, InterruptedException {
         // TODO recycle ip6 addresses
         StringBuilder env = new StringBuilder("");
         ((Map<String, String>)config.getOrDefault("env", new HashMap<>())).forEach(
@@ -82,26 +103,30 @@ public class DockerHelper {
                 + env
                 + " "                     + config.get("base")
                 + " "                     + command;
-        String cid = executeProcess(dockercmd).trim();
+        String cid = executeProcess(dockercmd).stdout.trim();
         if (addBridge)
             executeProcess("docker network connect bridge "+cid);
         executeProcess("docker start "+cid);
         return cid;
     }
 
-    public String getIp(String cid) throws IOException {
-        String ip6 = executeProcess("docker inspect --format='{{.NetworkSettings.Networks."+network+".GlobalIPv6Address}}' "+cid).trim();
+    public String getIp(String cid) throws IOException, InterruptedException {
+        String ip6 = executeProcess("docker inspect --format='{{.NetworkSettings.Networks."+network+".GlobalIPv6Address}}' "+cid).stdout.trim();
         if (ip6.equals("<no value>")) ip6 = null;
         assert ip6 == null || ip6.matches("[0-9a-f:]{3,}+") : "ip must be null or valid, but is: "+ip6;
         return ip6;
     }
-
-    public int getIid(String cid) throws IOException {
+    public String getIpForIid(int iid) throws UnknownHostException {
+        byte[] b = InetAddress.getByName(ips.net).getAddress();
+        b[12]=(byte)(iid>>24);b[13]=(byte)(iid>>16);b[14]=(byte)(iid>>8);b[15]=(byte)iid;
+        return InetAddress.getByAddress(b).getCanonicalHostName();
+    }
+    public int getIid(String cid) throws IOException, InterruptedException {
         byte[] b = InetAddress.getByName(getIp(cid)).getAddress();
         return ((b[12]&0xff)<<24)|((b[13]&0xff)<<16)|((b[14]&0xff)<<8)|((b[15]&0xff)<<0);
     }
 
-    public void updateContainer(String cid_old, String cid_new) throws IOException {
+    public void updateContainer(String cid_old, String cid_new) throws IOException, InterruptedException {
         String ip6 = getIp(cid_old);
         String ip6_freed = getIp(cid_new);
         executeProcess("docker network disconnect "+network+" "+cid_old);
@@ -111,36 +136,39 @@ public class DockerHelper {
         ips.freeIp(ip6_freed);
     }
 
-    public void rollbackContainer(String cid, String cid_old) throws IOException {
+    public void rollbackContainer(String cid, String cid_old) throws IOException, InterruptedException {
         String ip6 = getIp(cid);
         executeProcess("docker unpause "+cid_old);
         executeProcess("docker network disconnect "+network+" "+cid);
         executeProcess("docker network connect --ip6="+ip6+" "+network+" "+cid_old);
     }
 
-    public String commitContainer(String cid) throws IOException {
-        String imageid = executeProcess("docker commit "+cid);
+    public String commitContainer(String cid) throws IOException, InterruptedException {
+        String imageid = executeProcess("docker commit "+cid).stdout;
         imageid = imageid.replace("sha256:","").replace("\n","");
         return imageid;
     }
 
-    public static void removeAllContainers() throws IOException {
-        String allContainers = executeProcess("docker ps -a -q").replaceAll("\n"," ");
+    public static void removeAllContainers() throws IOException, InterruptedException {
+        String allContainers = executeProcess("docker ps -a -q").stdout.replaceAll("\n"," ");
         if (allContainers.equals(""))
             return;
         l.info("removing all containers, may take a while…");
-        executeProcess("docker unpause "+allContainers+" 2>/dev/null");
+        String pausedContainers = executeProcess("docker ps --filter status=paused -q").stdout;
+        if (!pausedContainers.equals(""))
+            executeProcess("docker unpause "+pausedContainers);
         executeProcess("docker rm -f "+allContainers);
     }
 
-    public int waitContainer(String cid) throws IOException {
-        return Integer.parseInt(executeProcess("docker wait "+cid).trim());
+    public int waitContainer(String cid) throws IOException, InterruptedException {
+        return Integer.parseInt(executeProcess("docker wait "+cid).stdout.trim());
     }
 
-    public void removeContainer(String cid) throws IOException {
+    public void removeContainer(String cid) throws IOException, InterruptedException {
         try { ips.freeIp(getIp(cid)); }
         catch (UnknownHostException e) {}
-        executeProcess("docker unpause "+cid);
+        if (executeProcess("docker inspect --format='{{.State.Status}}' "+cid).stdout.trim().equals("paused"))
+            executeProcess("docker unpause "+cid);
         executeProcess("docker rm -f "+cid);
     }
 }
