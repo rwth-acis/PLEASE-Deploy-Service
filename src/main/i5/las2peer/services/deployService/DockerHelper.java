@@ -43,7 +43,8 @@ public class DockerHelper {
         } else {
             ips = new IpPool(net_96);
             ips.allocIp();
-            executeProcess("docker network rm " + network);
+            if (!executeProcess("docker network ls -q -f NAME="+network).stdout.equals(""))
+                executeProcess("docker network rm " + network);
             executeProcess("docker network create --driver=bridge --ipv6 --subnet=" + net_96 + "/96 --ip-range=" + net_96 + "/96 --gateway=" + ips.allocIp() + " " + network);
         }
     }

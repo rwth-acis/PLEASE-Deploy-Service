@@ -116,7 +116,7 @@ public class DeployService extends RESTService {
 
 		// ip4 compatibility function
 		// TODO bug: for unknown reason jersey(?) adds a slash to the end of path
-		// TODO forward all http methods, better using nginx or similar for better performance
+		// TODO forward all http methods, low performance
 		@GET
 		@Path("/deployed/{iid}/{port}/{path : .*[^/]}")
 		public Response httpForward(@PathParam("iid") int iid, @PathParam("port") int port, @PathParam("path") String path
