@@ -10,7 +10,9 @@ import org.slf4j.LoggerFactory;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Scanner;
@@ -24,6 +26,7 @@ import static org.junit.Assert.*;
  */
 public class DockerHelperTest {
     private static DockerHelper dh;
+    private Logger l = LoggerFactory.getLogger(DockerHelper.class.getName());
 
     static String classHash = String.format("%4x", DockerHelperTest.class.getName().hashCode() & 65535);
 
@@ -43,7 +46,19 @@ public class DockerHelperTest {
         return config;
     }
     private String request(String ip6, int port) throws IOException {
-        Socket sock = new Socket(ip6, port);
+        Socket sock = null;
+        int tries = 0;
+        while (tries >= 0) {
+            tries++;
+            if (tries > 0 && tries % 5 == 0) {
+                l.info("Trying to connect to "+ip6+" "+port+" ..."+tries);
+            }
+            try {
+                sock = new Socket();
+                sock.connect(new InetSocketAddress(ip6, port), 1000);
+                tries = -1;
+            } catch (SocketTimeoutException e) {}
+        }
         Scanner s = new Scanner(sock.getInputStream()).useDelimiter("\\A");
         String res = s.hasNext() ? s.next() : "";
         return res;
