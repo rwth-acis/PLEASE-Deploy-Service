@@ -123,11 +123,13 @@ public class DeployService extends RESTService {
 				, @javax.ws.rs.core.Context final ContainerRequestContext req) {
 			URI req_uri = req.getUriInfo().getRequestUri();
 			String forward_uri = null;
+			String query = req_uri.getRawQuery();
+			String fragment = req_uri.getRawFragment();
 			try {
 				forward_uri = "http://" +
                         "[" + dsh.getIp(iid) + "]:" +
                         port + "/" +
-                        path + "?" + req_uri.getRawQuery() + "#" + req_uri.getRawFragment();
+                        path + ((query != null) ? "?"+query : "") +  ((fragment != null) ? "#"+fragment : "");
 				return ClientBuilder.newClient().target(forward_uri)
 						.request().headers((MultivaluedMap)req.getHeaders()).method(req.getMethod());
 			} catch (UnknownHostException e) {

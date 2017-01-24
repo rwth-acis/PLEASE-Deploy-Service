@@ -255,40 +255,4 @@ public class DeployServiceHelperTest {
         assertTrue(((JsonArray)deployments.get("457")).size() == 1);
         assertTrue(((JsonArray)deployments.get("457")).getInt(0) == iid2);
     }
-
-    // test is a sample and takes too long for including in regular test
-//    @Test
-    public void samples() throws Exception {
-        // TODO move to curl test
-        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(4));
-        Response r;
-        logUdp("fc00:"+classHash+"::1", 9999);
-        // this build requires active internet connection
-        dh.setAddBridge(true);
-        Map<String, Object> build_config = new HashMap<>();
-            build_config.put("app", 101);
-            build_config.put("version", "v0.1");
-            build_config.put("base", "alpine");
-            build_config.put("full", "{ apk add --no-cache git; git clone git://github.com/adabru/PLEASE-sample1 2>&1; pkill nc; }" +
-                    " | nc -u fc00:"+classHash+"::1 9999; :");
-        r = dsh.buildApp(build_config);
-        dh.setAddBridge(false);
-        assertEquals(200, r.getStatus());
-        Map<String, Object> deploy_config = new HashMap<>();
-            deploy_config.put("app", 101);
-            deploy_config.put("version", "v0.1");
-            deploy_config.put("base", "build");
-            deploy_config.put("command", "cd PLEASE-sample1 && httpd -f");
-        l.info("waiting for build...");
-        assertTrue("Build must be successful!", dsh.waitForBuild(101, "v0.1"));
-        l.info("build finished!");
-        r = dsh.deployApp(deploy_config);
-        assertEquals(201, r.getStatus());
-        String ip6 = new URI(r.getHeaderString("location")).getHost().replaceAll("[\\[\\]]","");
-        assertTrue("Must be ip6: <"+ip6+">", ip6.matches("[0-9a-f:]{3,}+"));
-        InputStream is = new URL("http://["+ip6+"]/index.html").openStream();
-        String answer = new Scanner(is).useDelimiter("\\A").next();
-        assertTrue("Answer is zero length!", answer.length() > 0);
-        l.info("first sample returned: \n"+answer);
-    }
 }
