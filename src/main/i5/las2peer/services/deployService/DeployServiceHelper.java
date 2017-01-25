@@ -32,7 +32,7 @@ public class DeployServiceHelper {
 
     private Map<String,Object> guardedConfig(Map<String,Object> orig) {
         // TODO get limits for authenticated user
-        int user_max_memory = (int)50e6;
+        int user_max_memory = (int)200e6;
         int user_max_disk = (int)250e6;
         int user_max_cpu = 512;
 
