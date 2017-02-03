@@ -151,14 +151,14 @@ public class DeployServiceHelper {
     }
 
     public static class BuildHook extends DockerHelper.FinishProcessCallback {
-        int app; String version; WebTarget receiver;
-        public BuildHook(int app, String version, WebTarget receiver) {
-            this.app = app; this.version = version; this.receiver = receiver;
+        int app; String version; int iteration; WebTarget receiver;
+        public BuildHook(int app, String version, int iteration, WebTarget receiver) {
+            this.app = app; this.version = version; this.iteration = iteration; this.receiver = receiver;
         }
         @Override
         public void run() {
             receiver.request().post(Entity.entity(
-                "{\"app\":"+app+",\"version\":\""+version+"\",\"exitCode\":"+exitCode+",\"runtime\":"+runtime+"}"
+                "{\"app\":"+app+",\"version\":\""+version+"\",\"iteration\":"+iteration+",\"exitCode\":"+exitCode+",\"runtime\":"+runtime+"}"
                 ,"application/json"));
         }
     }
@@ -177,10 +177,13 @@ public class DeployServiceHelper {
             docker_config.put("env", env);
             docker_config = guardedConfig(docker_config);
 
-            String cid = dh.startContainer(docker_config, new BuildHook(app, version, buildhookReceiver));
-            ResultSet rs = dm.query("SELECT COUNT(*) AS c FROM build_containers WHERE app=? AND version=?", app, version);
+            // TODO this is not 100% thread-safe (seems not to be worth it)
+            ResultSet rs = dm.query("SELECT COUNT(*) FROM build_containers WHERE app=? AND version=?", app, version);
             rs.next();
-            dm.update("INSERT INTO build_containers VALUES (?, ?, ?, ?, NULL)", app, version, cid, rs.getInt("c"));
+            int iteration = rs.getInt(1);
+            dm.update("INSERT INTO build_containers VALUES (?, ?, NULL, ?, NULL)", app, version, iteration);
+            String cid = dh.startContainer(docker_config, new BuildHook(app, version, iteration, buildhookReceiver));
+            dm.update("UPDATE build_containers SET cid=? WHERE (app,version,iteration)=(?,?,?)", cid, app, version, iteration);
             return Response.ok().build();
         } catch (SQLException | IOException | InterruptedException e) {
             l.error(e.toString());

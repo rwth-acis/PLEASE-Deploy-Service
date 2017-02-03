@@ -304,6 +304,6 @@ public class DeployServiceHelperTest {
             build_config.put("version", "v1");
         assertEquals(200, dsh.buildApp(build_config).getStatus());
         JsonObject jo = (JsonObject) toJson(bv.await(1000));
-        assertEquals(toJson("{\"app\":457,\"version\":\"v1\",\"exitCode\":0,\"runtime\":"+jo.getInt("runtime")+"}"), jo);
+        assertEquals(toJson("{\"app\":457,\"version\":\"v1\",\"iteration\":0,\"exitCode\":0,\"runtime\":"+jo.getInt("runtime")+"}"), jo);
     }
 }
