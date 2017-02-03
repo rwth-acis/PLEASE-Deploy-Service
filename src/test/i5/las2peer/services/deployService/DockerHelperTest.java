@@ -110,6 +110,7 @@ public class DockerHelperTest {
         assertTrue("<"+ip6_1+"> is not valid ip6 address", ip6_1.matches("[0-9a-f:]{3,}+"));
         String cid2 = dh.startContainer(config);
         String ip6_2 = dh.getIp(cid2);
+        assertTrue("<"+ip6_2+"> is not valid ip6 address", ip6_2.matches("[0-9a-f:]{3,}+"));
         assertNotEquals(ip6_1, ip6_2);
         dh.removeContainer(cid1);
         String cid3 = dh.startContainer(config);

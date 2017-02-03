@@ -6,6 +6,9 @@ import org.slf4j.LoggerFactory;
 import javax.json.*;
 import javax.json.stream.JsonGenerator;
 import javax.print.URIException;
+import javax.ws.rs.client.ClientBuilder;
+import javax.ws.rs.client.Entity;
+import javax.ws.rs.client.WebTarget;
 import javax.ws.rs.core.Response;
 import javax.xml.crypto.Data;
 import java.io.*;
@@ -24,9 +27,11 @@ public class DeployServiceHelper {
 
     private DockerHelper dh;
     private DatabaseManager dm;
+    private WebTarget buildhookReceiver;
 
-    public DeployServiceHelper(DockerHelper dh, DatabaseManager dm) {
+    public DeployServiceHelper(DockerHelper dh, DatabaseManager dm, String buildhookUrl) {
         this.dh = dh; this.dm = dm;
+        buildhookReceiver = ClientBuilder.newClient().target(buildhookUrl);
         // TODO dm.restore(); + check all cids, imageids and iids with docker daemon
     }
 
@@ -145,6 +150,18 @@ public class DeployServiceHelper {
         return Response.serverError().build();
     }
 
+    public static class BuildHook extends DockerHelper.FinishProcessCallback {
+        int app; String version; WebTarget receiver;
+        public BuildHook(int app, String version, WebTarget receiver) {
+            this.app = app; this.version = version; this.receiver = receiver;
+        }
+        @Override
+        public void run() {
+            receiver.request().post(Entity.entity(
+                "{\"app\":"+app+",\"version\":\""+version+"\",\"exitCode\":"+exitCode+",\"runtime\":"+runtime+"}"
+                ,"application/json"));
+        }
+    }
     public Response buildApp(Map<String, Object> config) {
         try {
             int app = (int) config.get("app");
@@ -160,7 +177,7 @@ public class DeployServiceHelper {
             docker_config.put("env", env);
             docker_config = guardedConfig(docker_config);
 
-            String cid = dh.startContainer(docker_config);
+            String cid = dh.startContainer(docker_config, new BuildHook(app, version, buildhookReceiver));
             ResultSet rs = dm.query("SELECT COUNT(*) AS c FROM build_containers WHERE app=? AND version=?", app, version);
             rs.next();
             dm.update("INSERT INTO build_containers VALUES (?, ?, ?, ?, NULL)", app, version, cid, rs.getInt("c"));

@@ -34,6 +34,7 @@ public class DeployService extends RESTService {
 	public String jdbcSchema;
 	public String dockerNetwork;
 	public String dockerSubnet;
+	public String buildhookUrl;
 
 	public DeployServiceHelper dsh;
 
@@ -42,6 +43,7 @@ public class DeployService extends RESTService {
 		this.dsh = new DeployServiceHelper(
 				new DockerHelper(dockerNetwork, dockerSubnet)
 				, new DatabaseManager(jdbcLogin, jdbcPass, jdbcUrl, jdbcSchema, "etc/db_migration", "database")
+				, buildhookUrl
 		);
 	}
 	@Override
@@ -74,7 +76,8 @@ public class DeployService extends RESTService {
 							"\nDELETE /deployed/{iid}                     : delete deployment with iid" +
 							"\n*      /deployed/{iid}/{port}              : forward requests to deployments" +
 							"\nGET    /build?app=7&version=v1&iteration=5 : show build information" +
-							"\nPOST   /build                              : start new build"
+							"\nPOST   /build                              : start new build" +
+							"\n"
 			).build();
 		}
 

@@ -1,5 +1,8 @@
 package i5.las2peer.services.deployService;
 
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
 import com.sun.org.apache.xalan.internal.xsltc.compiler.util.MultiHashtable;
 import jdk.nashorn.api.scripting.JSObject;
 import org.hamcrest.Description;
@@ -8,6 +11,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import sun.net.httpserver.HttpServerImpl;
 
 import javax.json.*;
 import javax.ws.rs.core.Response;
@@ -22,6 +26,9 @@ import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Scanner;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
 
 import static org.junit.Assert.*;
@@ -33,13 +40,16 @@ public class DeployServiceHelperTest {
     static Logger l = LoggerFactory.getLogger("");
 
     static DockerHelper dh;
+    static BuildhookVerifier bv;
     static String classHash = String.format("%4x", DeployServiceHelperTest.class.getName().hashCode() & 65535);
 
     @BeforeClass
     public static void setup() throws Exception {
         DockerHelper.removeAllContainers();
         dh = new DockerHelper(classHash, "fc00:"+classHash+"::");
+        HttpServer.create(new InetSocketAddress(7000), 0).start(); // sink
     }
+
 
     private DatabaseManager getMock(int testNumber) {
         return new DatabaseManager(
@@ -97,7 +107,7 @@ public class DeployServiceHelperTest {
 
     @Test
     public void buildApp() {
-        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(2));
+        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(2), "http://localhost:7000");
 
         Map<String, Object> build_config = new HashMap<>();
             build_config.put("app", 457);
@@ -129,7 +139,7 @@ public class DeployServiceHelperTest {
 
     @Test
     public void deployApp() throws Exception {
-        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(3));
+        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(3), "http://localhost:7000");
         Map<String, Object> deploy_config;
         Map<String, Object> build_config;
         Response r;
@@ -189,7 +199,7 @@ public class DeployServiceHelperTest {
 
     @Test
     public void updateApp() throws Exception {
-        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(4));
+        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(4), "http://localhost:7000");
         Response r;
         Map<String, Object> deploy_config;
         Map<String, Object> build_config;
@@ -226,7 +236,7 @@ public class DeployServiceHelperTest {
 
     @Test
     public void undeploy() {
-        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(5));
+        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(5), "http://localhost:7000");
         Response r;
 
         Map<String, Object> build_config = new HashMap<>();
@@ -254,5 +264,46 @@ public class DeployServiceHelperTest {
         JsonObject deployments = (JsonObject) toJson(r.getEntity().toString());
         assertTrue(((JsonArray)deployments.get("457")).size() == 1);
         assertTrue(((JsonArray)deployments.get("457")).getInt(0) == iid2);
+    }
+
+
+    public static class BuildhookVerifier {
+        HttpServer server;
+        String lastRequestBody;
+        Semaphore available = new Semaphore(0);
+
+        public BuildhookVerifier() throws IOException {
+            server = HttpServer.create(new InetSocketAddress(7001), 0);
+            server.createContext("/hook", new HttpHandler() {
+                @Override
+                public void handle(HttpExchange httpExchange) throws IOException {
+                    InputStream is = httpExchange.getRequestBody();
+                    Scanner s = new Scanner(is).useDelimiter("\\A");
+                    lastRequestBody = s.hasNext() ? s.next() : "";
+                    available.release();
+                }
+            });
+            server.setExecutor(null); // creates a default executor
+            server.start();
+        }
+        public String await(int timeout) throws InterruptedException, TimeoutException {
+            if (!available.tryAcquire(timeout, TimeUnit.SECONDS))
+                throw new TimeoutException();
+            return lastRequestBody;
+        }
+        public String url() { return "http://localhost:7001/hook"; }
+    }
+    @Test
+    public void buildhook() throws TimeoutException, InterruptedException, IOException {
+        BuildhookVerifier bv = new BuildhookVerifier();
+        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(5), bv.url());
+        Response r;
+
+        Map<String, Object> build_config = new HashMap<>();
+            build_config.put("app", 457);
+            build_config.put("version", "v1");
+        assertEquals(200, dsh.buildApp(build_config).getStatus());
+        JsonObject jo = (JsonObject) toJson(bv.await(1000));
+        assertEquals(toJson("{\"app\":457,\"version\":\"v1\",\"exitCode\":0,\"runtime\":"+jo.getInt("runtime")+"}"), jo);
     }
 }

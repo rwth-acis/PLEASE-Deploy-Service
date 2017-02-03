@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.ws.rs.Produces;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
@@ -57,19 +58,28 @@ public class DockerHelper {
     }
     private static class InputStreamAbsorber implements Runnable {
         InputStream is;
+        int limit; //soft
         String res;
-        public InputStreamAbsorber(InputStream is) {this.is = is;}
+        public InputStreamAbsorber(InputStream is) {this(is,Integer.MAX_VALUE);}
+        public InputStreamAbsorber(InputStream is, int limit) {this.is = is;this.limit = limit;}
         @Override
         public void run() {
-            Scanner s = new Scanner(is).useDelimiter("\\A");
-            res = s.hasNext() ? s.next() : "";
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            byte[] buf = new byte[2048];
+            int n;
+            try {
+                while ((n = is.read(buf)) != -1 && baos.size() < limit)
+                    baos.write(buf, 0, n);
+                res = baos.toString("UTF-8");
+            } catch (IOException e) {
+                l.warn(e.getMessage());
+            }
         }
     }
     public static ProcessOutput executeProcess(String shellcommand) throws IOException, InterruptedException {
         Process p = new ProcessBuilder("sh","-c",shellcommand).start();
-        Scanner s;
-        InputStreamAbsorber isa1 = new InputStreamAbsorber(p.getInputStream());
-        InputStreamAbsorber isa2 = new InputStreamAbsorber(p.getErrorStream());
+        InputStreamAbsorber isa1 = new InputStreamAbsorber(p.getInputStream(), (int)10e6);
+        InputStreamAbsorber isa2 = new InputStreamAbsorber(p.getErrorStream(), (int)10e6);
         Thread t1 = new Thread(isa1);
         Thread t2 = new Thread(isa2);
         t1.start(); t2.start();
@@ -84,9 +94,40 @@ public class DockerHelper {
         if (res.code != 0) throw new IOException("Error exeucting <"+shellcommand+">:"+res.stderr);
         return res;
     }
+    public static abstract class FinishProcessCallback implements Runnable {
+        public int exitCode;
+        public int runtime;
+        public void run(int exitCode, int runtime) {
+            this.exitCode = exitCode;
+            this.runtime = runtime;
+            run();
+        }
+    }
+    public static void executeProcess(String shellcommand, FinishProcessCallback callback) throws IOException {
+        Process p = new ProcessBuilder("sh","-c",shellcommand).start();
+        InputStreamAbsorber isa1 = new InputStreamAbsorber(p.getInputStream(), (int)10e6);
+        InputStreamAbsorber isa2 = new InputStreamAbsorber(p.getErrorStream(), (int)10e6);
+        Thread t1 = new Thread(isa1);
+        Thread t2 = new Thread(isa2);
+        t1.start(); t2.start();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    long time = new Date().getTime();
+                    int code = p.waitFor();
+                    if (callback != null)
+                        callback.run(code, (int)(new Date().getTime() - time));
+                } catch (InterruptedException e) {
+                    l.warn(e.getMessage());
+                }
+            }
+        }).start();
+    }
 
     // returns cid
-    public String startContainer(Map<String, Object> config) throws IOException, InterruptedException {
+    public String startContainer(Map<String, Object> config) throws IOException, InterruptedException { return startContainer(config,null); }
+    public String startContainer(Map<String, Object> config, FinishProcessCallback finishContainerHook) throws IOException, InterruptedException {
         // TODO recycle ip6 addresses
         StringBuilder env = new StringBuilder("");
         ((Map<String, String>)config.getOrDefault("env", new HashMap<>())).forEach(
@@ -108,13 +149,14 @@ public class DockerHelper {
         if (addBridge)
             executeProcess("docker network connect bridge "+cid);
         executeProcess("docker start "+cid);
+        executeProcess("docker wait "+cid, finishContainerHook);
         return cid;
     }
 
     public String getIp(String cid) throws IOException, InterruptedException {
         String ip6 = executeProcess("docker inspect --format='{{.NetworkSettings.Networks."+network+".GlobalIPv6Address}}' "+cid).stdout.trim();
         if (ip6.equals("<no value>")) ip6 = null;
-        assert ip6 == null || ip6.matches("[0-9a-f:]{3,}+") : "ip must be null or valid, but is: "+ip6;
+        assert ip6 == null || ip6.matches("[0-9a-f:]{3,}+") : "ip must be null or valid, but is: <"+ip6+">";
         return ip6;
     }
     public String getIpForIid(int iid) throws UnknownHostException {
