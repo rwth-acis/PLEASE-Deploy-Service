@@ -58,12 +58,19 @@ public class DeployServiceHelper {
 
         return config;
     }
+    public Response getDetails(int iid) {
+        // TODO statistics for cpu, memory, disk, network
+        try {
+            ResultSet rs = dm.query("SELECT * FROM deployments WHERE iid=?", iid);
+            return Response.ok(Entity.entity("{" +
+                "" +
+                "}", "application/json")).build();
+        } catch (SQLException e) {
+            l.error(e.toString());
+        }
+        return Response.serverError().build();
+    }
 
-    // {
-    //   "7": [449845, 64981, 98],
-    //   "13": [498, 0],
-    //    _
-    // }
     public Response getDeployments(Integer app) {
         // TODO implement userOnly
         try {
@@ -95,15 +102,7 @@ public class DeployServiceHelper {
         return Response.serverError().build();
     }
 
-    // {
-    //   "7": {
-    //      "v1": [0,1,2],
-    //      "v2": [0,1]
-    //   },
-    //   "8": { …
-    //   }
-    // }
-    public Response getBuild(Integer app, String version, Integer iteration) {
+    public Response getBuild(Integer app, String version, Long buildid) {
         // TODO implement userOnly
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -111,13 +110,13 @@ public class DeployServiceHelper {
             ResultSet rs;
             final long lnull = Long.MAX_VALUE;
             if (app == null) {
-                rs = dm.query("SELECT * FROM build_containers ORDER BY app,version,iteration");
+                rs = dm.query("SELECT * FROM build_containers ORDER BY app,version,buildid");
             } else if (version == null) {
-                rs = dm.query("SELECT * FROM build_containers WHERE app=? ORDER BY app,version,iteration", app);
-            } else if (iteration == null) {
-                rs = dm.query("SELECT * FROM build_containers WHERE app=? AND version=? ORDER BY app,version,iteration", app, version);
+                rs = dm.query("SELECT * FROM build_containers WHERE app=? ORDER BY app,version,buildid", app);
+            } else if (buildid == null) {
+                rs = dm.query("SELECT * FROM build_containers WHERE app=? AND version=? ORDER BY app,version,buildid", app, version);
             } else {
-                rs = dm.query("SELECT * FROM build_containers WHERE app=? AND version=? AND iteration=?", app, version, iteration);
+                rs = dm.query("SELECT * FROM build_containers WHERE buildid=?", buildid);
                 jg.writeStartObject();
                 jg.write("ip6", dh.getIp(rs.getString("cid")));
                 jg.writeEnd().close();
@@ -140,7 +139,7 @@ public class DeployServiceHelper {
                     curVersion = rs.getString("version");
                     jg.writeStartArray(curVersion);
                 }
-                jg.write(rs.getInt("iteration"));
+                jg.write(rs.getLong("buildid"));
             }
             jg.writeEnd().writeEnd().writeEnd().close();
             return Response.ok(baos.toString("utf8")).build();
@@ -151,14 +150,14 @@ public class DeployServiceHelper {
     }
 
     public static class BuildHook extends DockerHelper.FinishProcessCallback {
-        int app; String version; int iteration; WebTarget receiver;
-        public BuildHook(int app, String version, int iteration, WebTarget receiver) {
-            this.app = app; this.version = version; this.iteration = iteration; this.receiver = receiver;
+        int app; String version; long buildid; WebTarget receiver;
+        public BuildHook(int app, String version, long buildid, WebTarget receiver) {
+            this.app = app; this.version = version; this.buildid = buildid; this.receiver = receiver;
         }
         @Override
         public void run() {
             receiver.request().post(Entity.entity(
-                "{\"app\":"+app+",\"version\":\""+version+"\",\"iteration\":"+iteration+",\"exitCode\":"+exitCode+",\"runtime\":"+runtime+"}"
+                "{\"app\":"+app+",\"version\":\""+version+"\",\"buildid\":"+buildid+",\"exitCode\":"+exitCode+",\"runtime\":"+runtime+"}"
                 ,"application/json"));
         }
     }
@@ -178,13 +177,10 @@ public class DeployServiceHelper {
             docker_config = guardedConfig(docker_config);
 
             // TODO this is not 100% thread-safe (seems not to be worth it)
-            ResultSet rs = dm.query("SELECT COUNT(*) FROM build_containers WHERE app=? AND version=?", app, version);
-            rs.next();
-            int iteration = rs.getInt(1);
-            dm.update("INSERT INTO build_containers VALUES (?, ?, NULL, ?, NULL)", app, version, iteration);
-            String cid = dh.startContainer(docker_config, new BuildHook(app, version, iteration, buildhookReceiver));
-            dm.update("UPDATE build_containers SET cid=? WHERE (app,version,iteration)=(?,?,?)", cid, app, version, iteration);
-            return Response.ok().build();
+            long buildid = System.currentTimeMillis();
+            String cid = dh.startContainer(docker_config, new BuildHook(app, version, buildid, buildhookReceiver));
+            dm.update("INSERT INTO build_containers VALUES (?, ?, ?, ?, NULL)", app, version, cid, buildid);
+            return Response.ok("{\"buildid\":"+buildid+"}","application/json").build();
         } catch (SQLException | IOException | InterruptedException e) {
             l.error(e.toString());
         }
@@ -250,6 +246,9 @@ public class DeployServiceHelper {
             if (!rs.next())
                 return Response.status(404).entity("No deployment found with interface id "+iid+"!").build();
             String cid_old = rs.getString("cid");
+
+            if (((Integer)config.get("app")).intValue() != rs.getInt("app"))
+                return Response.status(400).entity("App id does not match deployment").build();
 
             rs = dm.query("SELECT * FROM build_containers WHERE app=? AND version=?", rs.getInt("app"), config.get("version"));
             if (!rs.next())

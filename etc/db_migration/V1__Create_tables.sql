@@ -6,9 +6,9 @@ CREATE TABLE build_containers (
   `app` INT NOT NULL
 , `version` VARCHAR(255)
 , `cid` VARCHAR(255)
-, `iteration` INT
+, `buildid` BIGINT
 , `imageid` VARCHAR(255)
-, CONSTRAINT pk_build PRIMARY KEY (app,version,iteration)
+, CONSTRAINT pk_build PRIMARY KEY (buildid)
 );
 
 CREATE TABLE deployment_containers (

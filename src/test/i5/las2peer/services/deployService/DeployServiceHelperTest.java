@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import sun.net.httpserver.HttpServerImpl;
 
 import javax.json.*;
+import javax.ws.rs.client.Entity;
 import javax.ws.rs.core.Response;
 
 import java.io.*;
@@ -47,7 +48,7 @@ public class DeployServiceHelperTest {
     public static void setup() throws Exception {
         DockerHelper.removeAllContainers();
         dh = new DockerHelper(classHash, "fc00:"+classHash+"::");
-        HttpServer.create(new InetSocketAddress(7000), 0).start(); // sink
+        HttpServer.create(new InetSocketAddress(6800), 0).start(); // sink
     }
 
 
@@ -107,39 +108,49 @@ public class DeployServiceHelperTest {
 
     @Test
     public void buildApp() {
-        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(2), "http://localhost:7000");
+        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(2), "http://localhost:6800");
+        long bId0, bId1, bId2, bId3;
+        Response r;
 
         Map<String, Object> build_config = new HashMap<>();
             build_config.put("app", 457);
             build_config.put("version", "v1");
-        Response r = dsh.buildApp(build_config);
+        r = dsh.buildApp(build_config);
         assertEquals(200, r.getStatus());
+        bId0 = ((JsonObject)toJson((String) r.getEntity())).getJsonNumber("buildid").longValue();
+        assertTrue("<"+bId0+"> must be valid timestamp", bId0 > Integer.MAX_VALUE);
         r = dsh.buildApp(build_config);
         assertEquals(200, r.getStatus());
             build_config.put("version", "v2");
+        bId1 = ((JsonObject)toJson((String) r.getEntity())).getJsonNumber("buildid").longValue();
+        assertTrue("<"+bId1+"> must be valid timestamp", bId1 > bId0);
         r = dsh.buildApp(build_config);
         assertEquals(200, r.getStatus());
             build_config.put("app", 458);
             build_config.put("version", "v1");
+        bId2 = ((JsonObject)toJson((String) r.getEntity())).getJsonNumber("buildid").longValue();
+        assertTrue("<"+bId2+"> must be valid timestamp", bId2 > bId1);
         r = dsh.buildApp(build_config);
         assertEquals(200, r.getStatus());
+        bId3 = ((JsonObject)toJson((String) r.getEntity())).getJsonNumber("buildid").longValue();
+        assertTrue("<"+bId3+"> must be valid timestamp", bId3 > bId2);
         r = dsh.getBuild(null, null, null);
         assertEquals(200, r.getStatus());
-        assertEquals(toJson("{\"457\":{\"v1\":[0,1],\"v2\":[0]},\"458\":{\"v1\":[0]}}")
+        assertEquals(toJson("{\"457\":{\"v1\":["+bId0+","+bId1+"],\"v2\":["+bId2+"]},\"458\":{\"v1\":["+bId3+"]}}")
             , toJson(r.getEntity().toString()));
         r = dsh.getBuild(457, null, null);
         assertEquals(200, r.getStatus());
-        assertEquals(toJson("{\"457\":{\"v1\":[0,1],\"v2\":[0]}}")
+        assertEquals(toJson("{\"457\":{\"v1\":["+bId0+","+bId1+"],\"v2\":["+bId2+"]}}")
             , toJson(r.getEntity().toString()));
         r = dsh.getBuild(457, "v1", null);
         assertEquals(200, r.getStatus());
-        assertEquals(toJson("{\"457\":{\"v1\":[0,1]}}")
+        assertEquals(toJson("{\"457\":{\"v1\":["+bId0+","+bId1+"]}}")
             , toJson(r.getEntity().toString()));
     }
 
     @Test
     public void deployApp() throws Exception {
-        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(3), "http://localhost:7000");
+        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(3), "http://localhost:6800");
         Map<String, Object> deploy_config;
         Map<String, Object> build_config;
         Response r;
@@ -199,7 +210,7 @@ public class DeployServiceHelperTest {
 
     @Test
     public void updateApp() throws Exception {
-        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(4), "http://localhost:7000");
+        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(4), "http://localhost:6800");
         Response r;
         Map<String, Object> deploy_config;
         Map<String, Object> build_config;
@@ -236,7 +247,7 @@ public class DeployServiceHelperTest {
 
     @Test
     public void undeploy() {
-        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(5), "http://localhost:7000");
+        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(5), "http://localhost:6800");
         Response r;
 
         Map<String, Object> build_config = new HashMap<>();
@@ -302,8 +313,10 @@ public class DeployServiceHelperTest {
         Map<String, Object> build_config = new HashMap<>();
             build_config.put("app", 457);
             build_config.put("version", "v1");
-        assertEquals(200, dsh.buildApp(build_config).getStatus());
+        r = dsh.buildApp(build_config);
+        assertEquals(200, r.getStatus());
+        long bId = ((JsonObject)toJson((String) r.getEntity())).getJsonNumber("buildid").longValue();
         JsonObject jo = (JsonObject) toJson(bv.await(1000));
-        assertEquals(toJson("{\"app\":457,\"version\":\"v1\",\"iteration\":0,\"exitCode\":0,\"runtime\":"+jo.getInt("runtime")+"}"), jo);
+        assertEquals(toJson("{\"app\":457,\"version\":\"v1\",\"buildid\":"+bId+",\"exitCode\":0,\"runtime\":"+jo.getInt("runtime")+"}"), jo);
     }
 }

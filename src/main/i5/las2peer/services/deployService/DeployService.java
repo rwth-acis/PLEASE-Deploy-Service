@@ -75,7 +75,7 @@ public class DeployService extends RESTService {
 							"\nPUT    /deployed/{iid}                     : update deployment with iid" +
 							"\nDELETE /deployed/{iid}                     : delete deployment with iid" +
 							"\n*      /deployed/{iid}/{port}              : forward requests to deployments" +
-							"\nGET    /build?app=7&version=v1&iteration=5 : show build information" +
+							"\nGET    /build?app=7&version=v1&buildid=5   : show build information" +
 							"\nPOST   /build                              : start new build" +
 							"\n"
 			).build();
@@ -99,8 +99,7 @@ public class DeployService extends RESTService {
 		@Path("/deployed/{iid}")
 		@Produces(MediaType.APPLICATION_JSON)
 		public Response getDeploymentDetails(@PathParam("iid") int iid) {
-			// TODO return dsh.getDetails(iid);
-			return Response.serverError().entity("Not implemented!").build();
+			return dsh.getDetails(iid);
 		}
 
 		@PUT
@@ -144,8 +143,8 @@ public class DeployService extends RESTService {
 		@GET
 		@Path("/build")
 		@Produces(MediaType.APPLICATION_JSON)
-		public Response getBuild(@QueryParam("app") Integer app, @QueryParam("version") String version, @QueryParam("iteration") Integer iteration) {
-			return dsh.getBuild(app, version, iteration);
+		public Response getBuild(@QueryParam("app") Integer app, @QueryParam("version") String version, @QueryParam("buildid") Long buildid) {
+			return dsh.getBuild(app, version, buildid);
 		}
 
 		@POST

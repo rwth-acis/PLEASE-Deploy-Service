@@ -23,7 +23,10 @@ import javax.json.Json;
 import javax.json.JsonObject;
 import javax.json.JsonReader;
 import javax.json.JsonStructure;
+import javax.ws.rs.client.Client;
 import javax.ws.rs.client.ClientBuilder;
+import javax.ws.rs.client.Entity;
+import javax.ws.rs.client.WebTarget;
 import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.Response;
 
@@ -111,63 +114,69 @@ public class DeployServiceTest {
 //				"\n*      /deployed/{iid}/{port}              : forward requests to deployments" +
 //				"\nGET    /build?app=7&version=v1&iteration=5 : show build information" +
 //				"\nPOST   /build                              : start new build"
-		MiniClient c = new MiniClient();
-		c.setAddressPort(HTTP_ADDRESS, HTTP_PORT);
-		c.setLogin(Long.toString(testAgent.getId()), testPass);
-		ClientResponse res;
+		Client c = ClientBuilder.newClient()
+				.property("jersey.config.client.connectTimeout", 4000)
+				.property("jersey.config.client.readTimeout", 4000);
+		WebTarget wt = c.target("http://127.0.0.1:" + WebConnector.DEFAULT_HTTP_PORT + "/deploy/");
+		Response res;
 		Socket s;
 		BufferedReader br;
 
 		// POST /build
-		res = c.sendRequest("POST", "deploy/build"
-			, "{\"app\":7, \"version\":\"v1\", \"full\":\"echo 111 > somefile\"}");
-		assertEquals(200, res.getHttpCode());
-		res = c.sendRequest("POST", "deploy/build"
-			, "{\"app\":7, \"version\":\"v2\", \"full\":\"echo 222 > somefile\"}");
-		assertEquals(200, res.getHttpCode());
+		res = wt.path("build").request().post(Entity.entity(
+			"{\"app\":7, \"version\":\"v1\", \"full\":\"echo 111 > somefile\"}"
+			, "application/json"));
+		assertEquals(200, res.getStatus());
+		long bId0 = ((JsonObject)toJson(res.readEntity(String.class))).getJsonNumber("buildid").longValue();
+		res = wt.path("build").request().post(Entity.entity(
+			"{\"app\":7, \"version\":\"v2\", \"full\":\"echo 222 > somefile\"}"
+			, "application/json"));
+		assertEquals(200, res.getStatus());
+		long bId1 = ((JsonObject)toJson(res.readEntity(String.class))).getJsonNumber("buildid").longValue();
 
 		// GET /build
-		res = c.sendRequest("GET", "deploy/build", "");
-		assertEquals(200, res.getHttpCode());
-		assertEquals(toJson("{\"7\":{\"v1\":[0],\"v2\":[0]}}")
-			, toJson(res.getResponse()));
+		res = wt.path("build").request().get();
+		assertEquals(200, res.getStatus());
+		assertEquals(toJson("{\"7\":{\"v1\":["+bId0+"],\"v2\":["+bId1+"]}}")
+			, toJson(res.readEntity(String.class)));
 
 		// POST /deployed
-		res = c.sendRequest("POST", "deploy/deployed"
-			, "{\"app\":7, \"version\":\"v1\", \"base\":\"build\", \"command\":\"httpd -f\"}");
-		assertEquals(201, res.getHttpCode());
-		int iid = ((JsonObject)toJson(res.getResponse())).getInt("iid");
-		String ip6 = ((JsonObject)toJson(res.getResponse())).getString("ip6");
-		c.setAddressPort("http://["+ip6+"]", 80);
-		res = c.sendRequest("GET", "somefile", "");
-		assertEquals(200, res.getHttpCode());
-		assertEquals("111", res.getResponse().trim());
-		c.setAddressPort(HTTP_ADDRESS, HTTP_PORT);
+		res = wt.path("deployed").request().post(Entity.entity(
+			"{\"app\":7, \"version\":\"v1\", \"base\":\"build\", \"command\":\"httpd -f\"}"
+			, "application/json"));
+		assertEquals(201, res.getStatus());
+		JsonObject joRes = (JsonObject) toJson(res.readEntity(String.class));
+		int iid = joRes.getInt("iid");
+		String ip6 = joRes.getString("ip6");
+		res = c.target("http://["+ip6+"]:80/").path("somefile").request().get();
+		assertEquals(200, res.getStatus());
+		assertEquals("111", res.readEntity(String.class).trim());
 
 		// GET /deployed/{iid}/{port}
-		res = c.sendRequest("GET", "deploy/deployed/"+iid+"/80/somefile", "");
-		assertEquals(200, res.getHttpCode());
-		assertEquals("111", res.getResponse().trim());
+		res = wt.path("deployed/"+iid+"/80/somefile").request().get();
+		assertEquals(200, res.getStatus());
+		assertEquals("111", res.readEntity(String.class).trim());
 
 		// PUT /deployed/{iid}
-		res = c.sendRequest("PUT", "deploy/deployed/"+iid
-				, "{\"app\":7, \"version\":\"v2\", \"base\":\"build\", \"command\":\"httpd -f\"}");
-		assertEquals(200, res.getHttpCode());
-		res = c.sendRequest("GET", "deploy/deployed/"+iid+"/80/somefile", "");
-		assertEquals(200, res.getHttpCode());
-		assertEquals("222", res.getResponse().trim());
+		res = wt.path("deployed/"+iid).request().put(Entity.entity(
+			"{\"app\":7, \"version\":\"v2\", \"base\":\"build\", \"command\":\"httpd -f\"}"
+			, "application/json"));
+		assertEquals(200, res.getStatus());
+		res = wt.path("deployed/"+iid+"/80/somefile").request().get();
+		assertEquals(200, res.getStatus());
+		assertEquals("222", res.readEntity(String.class).trim());
 
 		// GET /deployed
-		res = c.sendRequest("GET", "deploy/deployed", "");
-		assertEquals(200, res.getHttpCode());
-		assertEquals(toJson("{\"7\":["+iid+"]}"), toJson(res.getResponse()));
+		res = wt.path("deployed").request().get();
+		assertEquals(200, res.getStatus());
+		assertEquals(toJson("{\"7\":["+iid+"]}"), toJson(res.readEntity(String.class)));
 
 		// DELETE /deployed/{iid}
-		res = c.sendRequest("DELETE", "deploy/deployed/"+iid, "");
-		assertEquals(200, res.getHttpCode());
-		res = c.sendRequest("GET", "deploy/deployed", "");
-		assertEquals(200, res.getHttpCode());
-		assertEquals(toJson("{}"), toJson(res.getResponse()));
+		res = wt.path("deployed/"+iid).request().delete();
+		assertEquals(200, res.getStatus());
+		res = wt.path("deployed").request().get();
+		assertEquals(200, res.getStatus());
+		assertEquals(toJson("{}"), toJson(res.readEntity(String.class)));
 	}
 
 	@Test
