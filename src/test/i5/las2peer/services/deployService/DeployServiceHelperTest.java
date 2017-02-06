@@ -27,9 +27,7 @@ import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Scanner;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.*;
 import java.util.regex.Pattern;
 
 import static org.junit.Assert.*;
@@ -280,27 +278,24 @@ public class DeployServiceHelperTest {
 
     public static class BuildhookVerifier {
         HttpServer server;
-        String lastRequestBody;
-        Semaphore available = new Semaphore(0);
+        BlockingQueue<String> got = new LinkedBlockingQueue<>();
 
         public BuildhookVerifier() throws IOException {
             server = HttpServer.create(new InetSocketAddress(7001), 0);
-            server.createContext("/hook", new HttpHandler() {
-                @Override
-                public void handle(HttpExchange httpExchange) throws IOException {
+            server.createContext("/hook", httpExchange -> {
+                try {
                     InputStream is = httpExchange.getRequestBody();
                     Scanner s = new Scanner(is).useDelimiter("\\A");
-                    lastRequestBody = s.hasNext() ? s.next() : "";
-                    available.release();
-                }
+                    got.add(s.hasNext() ? s.next() : "");
+                } catch(Exception e) { e.printStackTrace(); }
             });
             server.setExecutor(null); // creates a default executor
             server.start();
         }
         public String await(int timeout) throws InterruptedException, TimeoutException {
-            if (!available.tryAcquire(timeout, TimeUnit.SECONDS))
-                throw new TimeoutException();
-            return lastRequestBody;
+            String last = got.poll(timeout, TimeUnit.MILLISECONDS);
+            if (last == null) throw new TimeoutException();
+            return last;
         }
         public String url() { return "http://localhost:7001/hook"; }
     }
