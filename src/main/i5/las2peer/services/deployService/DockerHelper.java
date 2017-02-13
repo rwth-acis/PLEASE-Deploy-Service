@@ -138,9 +138,9 @@ public class DockerHelper {
 
         String dockercmd = "docker create"
                 + " --network="+network
-                + " --memory "            + config.get("memory")
-                + " --cpu-shares "        + config.get("cpu")
-//                + " --storage-opt size="  + config.get("disk")
+                + " --memory "            + ((Map)config.get("limit")).get("memory")
+                + " --cpu-shares "        + ((Map)config.get("limit")).get("cpu")
+//                + " --storage-opt size="  + ((Map)config.get("limit")).get("disk")
                 + " --ip6="              + config.getOrDefault("ip6", ips.allocIp())
                 + env
                 + " "                     + config.get("base")

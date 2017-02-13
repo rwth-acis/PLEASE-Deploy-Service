@@ -41,6 +41,7 @@ public class DeployServiceHelperTest {
     static DockerHelper dh;
     static BuildhookVerifier bv;
     static String classHash = String.format("%4x", DeployServiceHelperTest.class.getName().hashCode() & 65535);
+    static String userId = "someUser"; 
 
     @BeforeClass
     public static void setup() throws Exception {
@@ -173,13 +174,13 @@ public class DeployServiceHelperTest {
             // docker run     nc -l -p 5000 -e sh -c •"printf •\•"hi;•\$AA;•\${BB_B}•\•"•"
             String command = "nc -l -p 5000 -e sh -c \"printf \\\"hi;\\$AA;\\${BB_B}\\\"\"";
             deploy_config.put("command", command);
-        r = dsh.deployApp(deploy_config);
+        r = dsh.deployApp(deploy_config, userId);
         assertEquals(201, r.getStatus());
         jo = (JsonObject) toJson(r.getEntity().toString());
         assertTrue("Response must include iid", jo.getInt("iid",-1) != -1);
         assertTrue("Must be ip6: <"+jo.getString("ip6")+">", jo.getString("ip6").matches("[0-9a-f:]{3,}+"));
         assertEquals("hi;xx;xx x", request(jo.getString("ip6"), 5000));
-        r = dsh.getDeployments(null);
+        r = dsh.getDeployments(null, false, null);
         assertEquals(200, r.getStatus());
         assertTrue("must match {\"456\":\\[[0-9]*\\]}"
             , toJson(r.getEntity().toString()).toString().matches("^\\{\"456\":\\[[0-9]*\\]\\}"));
@@ -197,10 +198,10 @@ public class DeployServiceHelperTest {
             deploy_config.put("version", "v1.9");
             deploy_config.put("base", "build");
             deploy_config.put("command", "nc -l -p 5000 -e cat ./somefile");
-        r = dsh.deployApp(deploy_config);
+        r = dsh.deployApp(deploy_config, userId);
         assertEquals(404, r.getStatus());
         deploy_config.put("version", "v2.0");
-        r = dsh.deployApp(deploy_config);
+        r = dsh.deployApp(deploy_config, userId);
         assertEquals(201, r.getStatus());
         jo = (JsonObject) toJson(r.getEntity().toString());
         assertEquals("apple", request(jo.getString("ip6"), 5000));
@@ -231,7 +232,7 @@ public class DeployServiceHelperTest {
             deploy_config.put("version", "v1");
             deploy_config.put("base", "build");
             deploy_config.put("command", "nc -ll -p 5000 -e cat somefile");
-        r = dsh.deployApp(deploy_config);
+        r = dsh.deployApp(deploy_config, userId);
         assertEquals(201, r.getStatus());
         JsonObject jo = (JsonObject) toJson(r.getEntity().toString());
         assertEquals("111", request(jo.getString("ip6"), 5000));
@@ -258,17 +259,17 @@ public class DeployServiceHelperTest {
             deploy_config.put("app", 457);
             deploy_config.put("version", "v1");
             deploy_config.put("command", "sleep 10m");
-        r = dsh.deployApp(deploy_config);
+        r = dsh.deployApp(deploy_config, userId);
         assertEquals(201, r.getStatus());
         int iid1 = ((JsonObject)toJson(r.getEntity().toString())).getInt("iid");
-        r = dsh.deployApp(deploy_config);
+        r = dsh.deployApp(deploy_config, userId);
         assertEquals(201, r.getStatus());
         int iid2 = ((JsonObject)toJson(r.getEntity().toString())).getInt("iid");
         assertNotEquals(iid1, iid2);
             deploy_config.put("version", "v2");
         assertEquals(200, dsh.updateApp(iid1, deploy_config).getStatus());
         assertEquals(200, dsh.undeploy(iid1).getStatus());
-        r = dsh.getDeployments(null);
+        r = dsh.getDeployments(null, false, null);
         assertEquals(200, r.getStatus());
         JsonObject deployments = (JsonObject) toJson(r.getEntity().toString());
         assertTrue(((JsonArray)deployments.get("457")).size() == 1);

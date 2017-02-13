@@ -22,5 +22,9 @@ CREATE TABLE deployments (
   `iid` INT(32) NOT NULL
 , `app` INT NOT NULL
 , `cid` VARCHAR(255)
+, `creator` VARCHAR(255)
+, `memory` INT
+, `disk` INT
+, `cpu` INT
 , CONSTRAINT pk_deploy PRIMARY KEY (iid)
 );

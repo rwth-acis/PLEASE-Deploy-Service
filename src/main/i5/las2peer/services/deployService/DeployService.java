@@ -5,6 +5,7 @@ import i5.las2peer.api.Context;
 import i5.las2peer.logging.L2pLogger;
 import i5.las2peer.restMapper.RESTService;
 import i5.las2peer.restMapper.annotations.ServicePath;
+import i5.las2peer.security.UserAgent;
 import org.glassfish.jersey.server.Uri;
 
 import java.io.IOException;
@@ -35,15 +36,20 @@ public class DeployService extends RESTService {
 	public String dockerNetwork;
 	public String dockerSubnet;
 	public String buildhookUrl;
+	public String user_limit_memory;
+	public String user_limit_disk;
+	public String user_limit_cpu;
 
 	public DeployServiceHelper dsh;
 
 	public DeployService() throws IOException, InterruptedException {
 		setFieldValues();
+		DatabaseManager dm = new DatabaseManager(jdbcLogin, jdbcPass, jdbcUrl, jdbcSchema, "etc/db_migration", "database");
 		this.dsh = new DeployServiceHelper(
-				new DockerHelper(dockerNetwork, dockerSubnet)
-				, new DatabaseManager(jdbcLogin, jdbcPass, jdbcUrl, jdbcSchema, "etc/db_migration", "database")
-				, buildhookUrl
+				new DockerHelper(dockerNetwork, dockerSubnet),
+				dm,
+				new ResourceDistribution(dm, user_limit_memory, user_limit_disk, user_limit_cpu),
+				buildhookUrl
 		);
 	}
 	@Override
@@ -84,15 +90,15 @@ public class DeployService extends RESTService {
 		@GET
 		@Path("/deployed")
 		@Produces(MediaType.APPLICATION_JSON)
-		public Response getDeployments(@QueryParam("app") Integer app/*, TODO @QueryParam("my") String my*/) {
-			return dsh.getDeployments(app);
+		public Response getDeployments(@QueryParam("app") Integer app, @QueryParam("my") String my) {
+			return dsh.getDeployments(app, my != null, getActiveUser());
 		}
 
 		@POST
 		@Path("/deployed")
 		@Produces(MediaType.APPLICATION_JSON)
 		public Response deployApp(String config) {
-			return dsh.deployApp((Map<String, Object>) toCollection(toJson(config)));
+			return dsh.deployApp((Map<String, Object>) toCollection(toJson(config)), getActiveUser());
 		}
 
 		@GET
@@ -106,14 +112,14 @@ public class DeployService extends RESTService {
 		@Path("/deployed/{iid}")
 		@Produces(MediaType.APPLICATION_JSON)
 		public Response updateApp(@PathParam("iid") int iid, String config) {
-			return dsh.updateApp(iid, (Map<String, Object>) toCollection(toJson(config)));
+			return dsh.updateApp(iid, (Map<String, Object>) toCollection(toJson(config)), getActiveUser());
 		}
 
 		@DELETE
 		@Path("/deployed/{iid}")
 		@Produces(MediaType.APPLICATION_JSON)
 		public Response undeploy(@PathParam("iid") int iid) {
-			return dsh.undeploy(iid);
+			return dsh.undeploy(iid, getActiveUser());
 		}
 
 		// ip4 compatibility function
@@ -154,6 +160,14 @@ public class DeployService extends RESTService {
 			return dsh.buildApp((Map<String, Object>) toCollection(toJson(config)));
 		}
 
+		private String getActiveUser() {
+			UserAgent ua = (UserAgent) Context.getCurrent().getMainAgent();
+			if(ua.getId() == Context.getCurrent().getLocalNode().getAnonymous().getId())
+				return "anonymous";
+			else
+				return String.valueOf(ua.getId());
+		}
+
 		public static JsonStructure toJson(String s) {
 			JsonReader jr = Json.createReader(new StringReader(s));
 			JsonStructure js = jr.read();
@@ -161,7 +175,6 @@ public class DeployService extends RESTService {
 
 			return js;
 		}
-
 		public static Object toCollection(JsonValue json) {
 			if (json instanceof JsonObject) {
 				Map<String, Object> res = new HashMap<>();

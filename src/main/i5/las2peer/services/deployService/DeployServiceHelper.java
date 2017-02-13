@@ -27,37 +27,15 @@ public class DeployServiceHelper {
 
     private DockerHelper dh;
     private DatabaseManager dm;
+    private ResourceDistribution rd;
     private WebTarget buildhookReceiver;
 
-    public DeployServiceHelper(DockerHelper dh, DatabaseManager dm, String buildhookUrl) {
-        this.dh = dh; this.dm = dm;
+    public DeployServiceHelper(DockerHelper dh, DatabaseManager dm, ResourceDistribution rd, String buildhookUrl) {
+        this.dh = dh; this.dm = dm; this.rd = rd;
         buildhookReceiver = ClientBuilder.newClient().target(buildhookUrl);
         // TODO dm.restore(); + check all cids, imageids and iids with docker daemon
     }
 
-    private Map<String,Object> guardedConfig(Map<String,Object> orig) {
-        // TODO get limits for authenticated user
-        int user_max_memory = (int)200e6;
-        int user_max_disk = (int)250e6;
-        int user_max_cpu = 512;
-
-        Map<String,Object> config = new HashMap<>();
-
-        config.put("memory", orig.getOrDefault("memory", user_max_memory));
-        if ((int)config.get("memory") > user_max_memory)
-            ;// memory request too high
-        config.put("disk", orig.getOrDefault("disk", user_max_disk));
-        if ((int)config.get("disk") > user_max_disk)
-            ;// disk request too high
-        config.put("cpu", orig.getOrDefault("cpu", user_max_cpu));
-        if ((int)config.get("cpu") > user_max_cpu)
-            ;// cpu request too high
-        config.put("base", orig.getOrDefault("base", "busybox"));
-        config.put("command", orig.getOrDefault("command", "\"echo hello world!\""));
-        config.put("env", orig.getOrDefault("env", new HashMap<>()));
-
-        return config;
-    }
     public Response getDetails(int iid) {
         // TODO statistics for cpu, memory, disk, network
         try {
@@ -66,19 +44,19 @@ public class DeployServiceHelper {
                 "" +
                 "}", "application/json")).build();
         } catch (SQLException e) {
-            l.error(e.toString());
+            StringWriter sw = new StringWriter();e.printStackTrace(new PrintWriter(sw));l.error(sw.toString());
         }
         return Response.serverError().build();
     }
 
-    public Response getDeployments(Integer app) {
-        // TODO implement userOnly
+    public Response getDeployments(Integer app, boolean onlyMy, String userId) {
         try {
             ResultSet rs;
-            if (app == null)
-                rs = dm.query("SELECT * FROM deployments ORDER BY app");
-            else
-                rs = dm.query("SELECT * FROM deployments WHERE app=?", app);
+                 if (app == null && !onlyMy) rs = dm.query("SELECT * FROM deployments ORDER BY app");
+            else if (app == null &&  onlyMy) rs = dm.query("SELECT * FROM deployments WHERE creator=? ORDER BY app", userId);
+            else if (app != null && !onlyMy) rs = dm.query("SELECT * FROM deployments WHERE app=?", app);
+            else /*(app != null &&  onlyMy)*/rs = dm.query("SELECT * FROM deployments WHERE (app,creator)=(?,?)", app, userId);
+
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             JsonGenerator jg = Json.createGenerator(baos);
             long curApp = Long.MAX_VALUE;
@@ -97,7 +75,7 @@ public class DeployServiceHelper {
             jg.writeEnd().close();
             return Response.ok().entity(baos.toString("utf8")).build();
         } catch (SQLException | UnsupportedEncodingException e) {
-            l.error(e.toString());
+            StringWriter sw = new StringWriter();e.printStackTrace(new PrintWriter(sw));l.error(sw.toString());
         }
         return Response.serverError().build();
     }
@@ -144,7 +122,7 @@ public class DeployServiceHelper {
             jg.writeEnd().writeEnd().writeEnd().close();
             return Response.ok(baos.toString("utf8")).build();
         } catch (SQLException | IOException | InterruptedException e) {
-            l.error(e.toString());
+            StringWriter sw = new StringWriter();e.printStackTrace(new PrintWriter(sw));l.error(sw.toString());
         }
         return Response.serverError().build();
     }
@@ -168,13 +146,16 @@ public class DeployServiceHelper {
             String build_full = (String) config.getOrDefault("full", "");
             String base = (String) config.getOrDefault("base", "busybox");
             Map<String, Object> env = (Map<String, Object>) config.getOrDefault("env", new HashMap<>());
+            Map limit = (Map) config.getOrDefault("limit", new HashMap<>());
+            limit.putIfAbsent("memory", "400m");
+            limit.putIfAbsent("disk", "400m");
+            limit.putIfAbsent("cpu", "100");
             // TODO init + inc
 
             Map<String, Object> docker_config = new HashMap<>();
             docker_config.put("base", base);
             docker_config.put("command", build_full);
             docker_config.put("env", env);
-            docker_config = guardedConfig(docker_config);
 
             // TODO this is not 100% thread-safe (seems not to be worth it)
             long buildid = System.currentTimeMillis();
@@ -182,7 +163,7 @@ public class DeployServiceHelper {
             dm.update("INSERT INTO build_containers VALUES (?, ?, ?, ?, NULL)", app, version, cid, buildid);
             return Response.ok("{\"buildid\":"+buildid+"}","application/json").build();
         } catch (SQLException | IOException | InterruptedException e) {
-            l.error(e.toString());
+            StringWriter sw = new StringWriter();e.printStackTrace(new PrintWriter(sw));l.error(sw.toString());
         }
         return Response.serverError().build();
     }
@@ -198,8 +179,13 @@ public class DeployServiceHelper {
         config.putIfAbsent("base", "busybox");
         config.putIfAbsent("command", "");
         config.putIfAbsent("env", new HashMap<>());
+        config.putIfAbsent("limit", new HashMap<>());
+        Map limit = (Map) config.get("limit");
+        limit.putIfAbsent("memory", "50m");
+        limit.putIfAbsent("disk", "50m");
+        limit.putIfAbsent("cpu", "125");
     }
-    public Response deployApp(Map<String, Object> config) {
+    public Response deployApp(Map<String, Object> config, String userId) {
         int app = (int) config.get("app");
         String version = (String) config.get("version");
         setDeployDefaults(config);
@@ -219,36 +205,49 @@ public class DeployServiceHelper {
                 base = imageid;
             }
 
+            Map<String,String> limit = (Map<String, String>) config.get("limit");
+            if (!rd.checkUserAffordable(limit, userId))
+                return Response.status(402).entity("You have not enough free resources: "+rd.account(userId).toString()).build();
+
             Map<String, Object> container_config = new HashMap<>();
                 container_config.put("base", base);
                 container_config.put("command", config.get("command"));
                 container_config.put("env", config.get("env"));
+                container_config.put("limit", limit);
 
-            String cid = dh.startContainer(guardedConfig(container_config));
+            String cid = dh.startContainer(container_config);
             int iid = dh.getIid(cid);
             dm.update("INSERT INTO deployment_containers VALUES (?,?,?)", iid, version, cid);
-            dm.update("INSERT INTO deployments VALUES (?,?,?)", iid, app, cid);
+            dm.update("INSERT INTO deployments VALUES (?,?,?,?,?,?,?)", iid, app, cid, userId, limit.get("memory"), limit.get("disk"), limit.get("cpu"));
             return Response.created(new URI("http://deployed/"+iid)).entity(
                 "{\"iid\":"+iid+", \"ip6\":\""+dh.getIp(cid)+"\"}"
             ).build();
         } catch (IOException | SQLException | URISyntaxException | InterruptedException e) {
-            l.error(e.toString());
+            StringWriter sw = new StringWriter();e.printStackTrace(new PrintWriter(sw));l.error(sw.toString());
         }
         return Response.serverError().build();
     }
 
-    public Response updateApp(int iid, Map<String, Object> config) {
+    public Response updateApp(int iid, Map<String, Object> config, String userId) {
         // TODO after rollback deadline: docker rm -f cid_old
+        // TODO resource limit update
         setDeployDefaults(config);
 
         try {
             ResultSet rs = dm.query("SELECT * FROM deployments WHERE iid=?", iid);
             if (!rs.next())
                 return Response.status(404).entity("No deployment found with interface id "+iid+"!").build();
+            if (!rs.getString("creator").equals(userId))
+                return Response.status(403).entity("only creator can update deployment").build();
             String cid_old = rs.getString("cid");
 
             if (((Integer)config.get("app")).intValue() != rs.getInt("app"))
                 return Response.status(400).entity("App id does not match deployment").build();
+
+            Map<String,String> limit = new HashMap<>();
+                limit.put("memory", rs.getString("memory"));
+                limit.put("disk", rs.getString("disk"));
+                limit.put("cpu", rs.getString("cpu"));
 
             rs = dm.query("SELECT * FROM build_containers WHERE app=? AND version=?", rs.getInt("app"), config.get("version"));
             if (!rs.next())
@@ -269,28 +268,34 @@ public class DeployServiceHelper {
                 container_config.put("base", base);
                 container_config.put("command", config.get("command"));
                 container_config.put("env", config.get("env"));
+                container_config.put("limit", limit);
 
-            String cid_new = dh.startContainer(guardedConfig(container_config));
+            String cid_new = dh.startContainer(container_config);
             dh.updateContainer(cid_old, cid_new);
             dm.update("INSERT INTO deployment_containers VALUES (?,?,?)", iid, config.get("version"), cid_new);
             dm.update("UPDATE deployments SET cid=? WHERE iid=?", cid_new, iid);
             return Response.ok().build();
         } catch (IOException | SQLException | InterruptedException e) {
-            l.error(e.toString());
+            StringWriter sw = new StringWriter();e.printStackTrace(new PrintWriter(sw));l.error(sw.toString());
         }
         return Response.serverError().build();
     }
 
-    public Response undeploy(int iid) {
+    public Response undeploy(int iid, String userId) {
         try {
+            ResultSet rs = dm.query("SELECT creator FROM deployments WHERE iid=?", iid);
+            if (!rs.next())
+                return Response.status(404).entity("No deployment found with interface id "+iid+"!").build();
+            if (!rs.getString("creator").equals(userId))
+                return Response.status(403).entity("only creator can delete deployment").build();
             dm.update("DELETE FROM deployments WHERE iid=?", iid);
-            ResultSet rs = dm.query("SELECT * FROM deployment_containers WHERE iid=?", iid);
+            rs = dm.query("SELECT * FROM deployment_containers WHERE iid=?", iid);
             while (rs.next())
                 dh.removeContainer(rs.getString("cid"));
             dm.update("DELETE FROM deployment_containers WHERE iid=?", iid);
             return Response.ok().build();
         } catch (SQLException | IOException | InterruptedException e) {
-            l.error(e.toString());
+            StringWriter sw = new StringWriter();e.printStackTrace(new PrintWriter(sw));l.error(sw.toString());
         }
         return Response.serverError().build();
     }
