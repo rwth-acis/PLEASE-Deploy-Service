@@ -238,7 +238,7 @@ public class DeployServiceHelper {
             ResultSet rs = dm.query("SELECT * FROM deployments WHERE iid=?", iid);
             if (!rs.next())
                 return Response.status(404).entity("No deployment found with interface id "+iid+"!").build();
-            if (!rs.getString("creator").equals(userId))
+            if (!rs.getString("creator").equals(userId) && !userId.equals("appmetadata"))
                 return Response.status(403).entity("only creator can update deployment").build();
             String cid_old = rs.getString("cid");
 

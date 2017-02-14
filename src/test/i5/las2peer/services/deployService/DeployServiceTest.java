@@ -14,6 +14,7 @@ import i5.las2peer.webConnector.client.MiniClient;
 
 import java.io.*;
 import java.net.Socket;
+import java.util.Base64;
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -23,10 +24,7 @@ import javax.json.Json;
 import javax.json.JsonObject;
 import javax.json.JsonReader;
 import javax.json.JsonStructure;
-import javax.ws.rs.client.Client;
-import javax.ws.rs.client.ClientBuilder;
-import javax.ws.rs.client.Entity;
-import javax.ws.rs.client.WebTarget;
+import javax.ws.rs.client.*;
 import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.Response;
 
@@ -36,32 +34,30 @@ import javax.ws.rs.core.Response;
  */
 public class DeployServiceTest {
 
-	private static final String HTTP_ADDRESS = "http://127.0.0.1";
-	private static final int HTTP_PORT = WebConnector.DEFAULT_HTTP_PORT;
+	static WebTarget wt_anonym, wt_meta, wt_adam;
 
 	private static LocalNode node;
 	private static WebConnector connector;
 	private static ByteArrayOutputStream logStream;
 
-	private static UserAgent testAgent;
-	private static final String testPass = "adamspass";
-
-	/**
-	 * Called before the tests start.
-	 * 
-	 * Sets up the node and initializes connector and users that can be used throughout the tests.
-	 * 
-	 * @throws Exception
-	 */
 	@BeforeClass
 	public static void startServer() throws Exception {
-
 		// start node
 		node = LocalNode.newNode();
-		testAgent = MockAgentFactory.getAdam();
-		testAgent.unlockPrivateKey(testPass); // agent must be unlocked in order to be stored
-		node.storeAgent(testAgent);
+		UserAgent adam = MockAgentFactory.getAdam();
+		adam.unlockPrivateKey("adamspass"); // agent must be unlocked in order to be stored
+		node.storeAgent(adam);
 		node.launch();
+
+		// TODO make connect and read timeout vendor agnostic (i.e. remove jersey dependency) when javax.rs 2.1 gets released (scheduled Q3 2017)
+		Client c = ClientBuilder.newClient()
+				.property("jersey.config.client.connectTimeout", 4000)
+				.property("jersey.config.client.readTimeout", 4000);
+		wt_anonym = c.target("http://127.0.0.1:" + WebConnector.DEFAULT_HTTP_PORT + "/deploy/");
+		wt_meta = c.target("http://127.0.0.1:" + WebConnector.DEFAULT_HTTP_PORT + "/deploy/");
+		wt_meta.register((ClientRequestFilter) req -> req.getHeaders().add("Authorization", "Basic "+ Base64.getEncoder().encodeToString(("appmetadata:abcdef123456").getBytes("utf8"))));
+		wt_adam = c.target("http://127.0.0.1:" + WebConnector.DEFAULT_HTTP_PORT + "/deploy/");
+		wt_adam.register((ClientRequestFilter) req -> req.getHeaders().add("Authorization", "Basic "+ Base64.getEncoder().encodeToString((adam.getId()+":adamspass").getBytes("utf8"))));
 
 		// during testing, the specified service version does not matter
 		ServiceAgent testService = ServiceAgent.createServiceAgent(
@@ -73,12 +69,10 @@ public class DeployServiceTest {
 		// start connector
 		logStream = new ByteArrayOutputStream();
 
-		connector = new WebConnector(true, HTTP_PORT, false, 1000);
+		connector = new WebConnector(true, WebConnector.DEFAULT_HTTP_PORT, false, 1000);
 		connector.setLogStream(new PrintStream(logStream));
 		connector.start(node);
 		Thread.sleep(1000); // wait a second for the connector to become ready
-		testAgent = MockAgentFactory.getAdam(); // get a locked agent
-
 	}
 
 	/**
@@ -117,31 +111,30 @@ public class DeployServiceTest {
 		Client c = ClientBuilder.newClient()
 				.property("jersey.config.client.connectTimeout", 4000)
 				.property("jersey.config.client.readTimeout", 4000);
-		WebTarget wt = c.target("http://127.0.0.1:" + WebConnector.DEFAULT_HTTP_PORT + "/deploy/");
 		Response res;
 		Socket s;
 		BufferedReader br;
 
 		// POST /build
-		res = wt.path("build").request().post(Entity.entity(
+		res = wt_anonym.path("build").request().post(Entity.entity(
 			"{\"app\":7, \"version\":\"v1\", \"full\":\"echo 111 > somefile\"}"
 			, "application/json"));
 		assertEquals(200, res.getStatus());
 		long bId0 = ((JsonObject)toJson(res.readEntity(String.class))).getJsonNumber("buildid").longValue();
-		res = wt.path("build").request().post(Entity.entity(
+		res = wt_anonym.path("build").request().post(Entity.entity(
 			"{\"app\":7, \"version\":\"v2\", \"full\":\"echo 222 > somefile\"}"
 			, "application/json"));
 		assertEquals(200, res.getStatus());
 		long bId1 = ((JsonObject)toJson(res.readEntity(String.class))).getJsonNumber("buildid").longValue();
 
 		// GET /build
-		res = wt.path("build").request().get();
+		res = wt_anonym.path("build").request().get();
 		assertEquals(200, res.getStatus());
 		assertEquals(toJson("{\"7\":{\"v1\":["+bId0+"],\"v2\":["+bId1+"]}}")
 			, toJson(res.readEntity(String.class)));
 
 		// POST /deployed
-		res = wt.path("deployed").request().post(Entity.entity(
+		res = wt_anonym.path("deployed").request().post(Entity.entity(
 			"{\"app\":7, \"version\":\"v1\", \"base\":\"build\", \"command\":\"httpd -f\"}"
 			, "application/json"));
 		assertEquals(201, res.getStatus());
@@ -153,36 +146,41 @@ public class DeployServiceTest {
 		assertEquals("111", res.readEntity(String.class).trim());
 
 		// GET /deployed/{iid}/{port}
-		res = wt.path("deployed/"+iid+"/80/somefile").request().get();
+		res = wt_anonym.path("deployed/"+iid+"/80/somefile").request().get();
 		assertEquals(200, res.getStatus());
 		assertEquals("111", res.readEntity(String.class).trim());
 
 		// PUT /deployed/{iid}
-		res = wt.path("deployed/"+iid).request().put(Entity.entity(
+		res = wt_adam.path("deployed/"+iid).request().put(Entity.entity(
+			"{\"app\":7, \"version\":\"v2\", \"base\":\"build\", \"command\":\"httpd -f\"}"
+			, "application/json"));
+		assertEquals(403, res.getStatus());
+		res = wt_meta.path("deployed/"+iid).request().put(Entity.entity(
 			"{\"app\":7, \"version\":\"v2\", \"base\":\"build\", \"command\":\"httpd -f\"}"
 			, "application/json"));
 		assertEquals(200, res.getStatus());
-		res = wt.path("deployed/"+iid+"/80/somefile").request().get();
+		res = wt_anonym.path("deployed/"+iid+"/80/somefile").request().get();
 		assertEquals(200, res.getStatus());
 		assertEquals("222", res.readEntity(String.class).trim());
 
 		// GET /deployed
-		res = wt.path("deployed").request().get();
+		res = wt_anonym.path("deployed").request().get();
 		assertEquals(200, res.getStatus());
 		assertEquals(toJson("{\"7\":["+iid+"]}"), toJson(res.readEntity(String.class)));
 
 		// DELETE /deployed/{iid}
-		res = wt.path("deployed/"+iid).request().delete();
+		res = wt_adam.path("deployed/"+iid).request().delete();
+		assertEquals(403, res.getStatus());
+		res = wt_anonym.path("deployed/"+iid).request().delete();
 		assertEquals(200, res.getStatus());
-		res = wt.path("deployed").request().get();
+		res = wt_anonym.path("deployed").request().get();
 		assertEquals(200, res.getStatus());
 		assertEquals(toJson("{}"), toJson(res.readEntity(String.class)));
 	}
 
 	@Test
 	public void testLife() throws InterruptedException {
-		Response result = ClientBuilder.newClient()
-				.target(HTTP_ADDRESS+":"+HTTP_PORT+"/deploy").request().get();
+		Response result = wt_anonym.path("/").request().get();
 		assertEquals(200, result.getStatus());
 	}
 

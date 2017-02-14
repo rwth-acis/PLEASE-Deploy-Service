@@ -1,25 +1,26 @@
 package i5.las2peer.services.deployService;
 
-import i5.las2peer.api.Configurable;
 import i5.las2peer.api.Context;
 import i5.las2peer.logging.L2pLogger;
+import i5.las2peer.p2p.AgentAlreadyRegisteredException;
+import i5.las2peer.p2p.LocalNode;
 import i5.las2peer.restMapper.RESTService;
 import i5.las2peer.restMapper.annotations.ServicePath;
+import i5.las2peer.security.AgentException;
+import i5.las2peer.security.L2pSecurityException;
 import i5.las2peer.security.UserAgent;
-import org.glassfish.jersey.server.Uri;
+import i5.las2peer.security.UserAgentException;
+import i5.las2peer.tools.CryptoException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.StringReader;
-import java.net.HttpURLConnection;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.URI;
 import java.net.UnknownHostException;
-import java.sql.SQLException;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
 import java.util.Map;
 
-import javax.json.*;
 import javax.ws.rs.*;
 import javax.ws.rs.client.ClientBuilder;
 import javax.ws.rs.container.ContainerRequestContext;
@@ -28,6 +29,8 @@ import javax.ws.rs.core.*;
 @ServicePath("deploy")
 public class DeployService extends RESTService {
 
+	Logger l = LoggerFactory.getLogger(DeployService.class.getName());
+
 	// from properties file, injected by LAS2peer
 	public String jdbcLogin;
 	public String jdbcPass;
@@ -35,21 +38,21 @@ public class DeployService extends RESTService {
 	public String jdbcSchema;
 	public String dockerNetwork;
 	public String dockerSubnet;
-	public String buildhookUrl;
+	public String appmetadataUrl;
 	public String user_limit_memory;
 	public String user_limit_disk;
 	public String user_limit_cpu;
 
 	public DeployServiceHelper dsh;
 
-	public DeployService() throws IOException, InterruptedException {
+	public DeployService() throws IOException, InterruptedException, CryptoException, L2pSecurityException, AgentException {
 		setFieldValues();
 		DatabaseManager dm = new DatabaseManager(jdbcLogin, jdbcPass, jdbcUrl, jdbcSchema, "etc/db_migration", "database");
 		this.dsh = new DeployServiceHelper(
 				new DockerHelper(dockerNetwork, dockerSubnet),
 				dm,
 				new ResourceDistribution(dm, user_limit_memory, user_limit_disk, user_limit_cpu),
-				buildhookUrl
+				appmetadataUrl+"/hook"
 		);
 	}
 	@Override
@@ -59,11 +62,11 @@ public class DeployService extends RESTService {
 	@Path("/")
 	public static class RootResource {
 
-		// instantiate the logger class
-		private final L2pLogger l = L2pLogger.getInstance(DeployService.class.getName());
-
+		static Logger l = LoggerFactory.getLogger(DeployService.RootResource.class.getName());
 
 		private DeployServiceHelper dsh;
+		// static required for lazy thread-safe instantiation
+		private static UserAgent appmetadataService = createAppmetadataAgent();
 
 		public RootResource() throws IOException {
 			this.dsh = ((DeployService) Context.getCurrent().getService()).dsh;
@@ -141,7 +144,7 @@ public class DeployService extends RESTService {
 				return ClientBuilder.newClient().target(forward_uri)
 						.request().headers((MultivaluedMap)req.getHeaders()).method(req.getMethod());
 			} catch (UnknownHostException e) {
-				l.warning(e.toString());
+				l.warn(e.toString());
 			}
 			return Response.serverError().build();
 		}
@@ -160,10 +163,30 @@ public class DeployService extends RESTService {
 			return dsh.buildApp((Map<String, Object>) JsonHelper.toCollection(config));
 		}
 
+		private static UserAgent createAppmetadataAgent() {
+			UserAgent ua = null;
+			String pleaseSecret = System.getenv("PLEASE_SECRET");
+			if (pleaseSecret == null) {
+				l.warn("no env variable PLEASE_SECRET exists, using default secret (insecure)");
+				pleaseSecret = "abcdef123456";
+			}
+			try {
+				ua = UserAgent.createUserAgent(pleaseSecret);
+				ua.unlockPrivateKey(pleaseSecret);
+				ua.setLoginName("appmetadata");
+				Context.getCurrent().getLocalNode().storeAgent(ua);
+			} catch (AgentException | CryptoException | L2pSecurityException e) {
+				StringWriter sw = new StringWriter(); e.printStackTrace(new PrintWriter(sw)); l.error(sw.toString());
+			}
+			return ua;
+		}
 		private String getActiveUser() {
+			// TODO find a better way to register appmetadata's useragent
 			UserAgent ua = (UserAgent) Context.getCurrent().getMainAgent();
 			if(ua.getId() == Context.getCurrent().getLocalNode().getAnonymous().getId())
 				return "anonymous";
+			else if(ua.getId() == appmetadataService.getId())
+				return "appmetadata";
 			else
 				return String.valueOf(ua.getId());
 		}
