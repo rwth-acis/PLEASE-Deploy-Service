@@ -7,6 +7,7 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.json.JsonStructure;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -36,15 +37,8 @@ public class DockerHelperTest {
         dh = new DockerHelper(classHash, "fc00:"+classHash+"::");
     }
 
-    private Map<String, Object> getConfig(int cpu, int memory, int disk, String base, String command) {
-        Map<String, Object> config = new HashMap<>();
-        config.put("cpu", cpu);
-        config.put("memory", memory);
-        config.put("disk", disk);
-        config.put("base", base);
-        config.put("command", command);
-        return config;
-    }
+    private JsonStructure json(Object s) { return JsonHelper.parse(((String)s).replaceAll("'","\"")); }
+    private Map<String,Object> map(String s) { return (Map) JsonHelper.toCollection(json(s)); }
     private String request(String ip6, int port) throws IOException {
         Socket sock = null;
         int tries = 0;
@@ -66,27 +60,24 @@ public class DockerHelperTest {
 
     @Test
     public void startContainer() throws Exception {
-        Map<String, Object> config = getConfig(512, 100_000_000, 220_000_000, "busybox", "echo \"hello world\"");
-        String cid = dh.startContainer(config);
+        String command = JsonHelper.toString("echo \"hello world\"");
+        String cid = dh.startContainer(map("{'base':'busybox','command':"+command+",'limit':{'cpu':512,'memory':'100m','disk':'220m'}}"));
         assertTrue("<"+cid+"> is not valid container id", cid.matches("[0-9a-f]{15,}+"));
     }
 
     @Test
     public void updateAndRollbackContainer() throws Exception {
-        String[] output;
-        Map<String, Object> config = getConfig(512, 100_000_000, 220_000_000, "busybox", null);
-
         // start first
-        config.put("command", "sh -c \"nc -ll -p 4444 -e printf 'first apple'\"");
-        String cid1 = dh.startContainer(config);
+        String command = JsonHelper.toString("sh -c \"nc -ll -p 4444 -e printf \\\"first apple\\\"\"");
+        String cid1 = dh.startContainer(map("{'base':'busybox','command':"+command+",'limit':{'cpu':512,'memory':'100m','disk':'220m'}}"));
         assertTrue("<"+cid1+"> is not valid container id", cid1.matches("[0-9a-f]{15,}+"));
         String ip6 = dh.getIp(cid1);
         assertTrue("<"+ip6+"> is not valid ip6 address", ip6.matches("[0-9a-f:]{3,}+"));
         assertEquals("first apple", request(ip6, 4444));
 
         // start second
-        config.put("command", "sh -c \"nc -ll -p 4444 -e printf 'second banana'\"");
-        String cid2 = dh.startContainer(config);
+        command = JsonHelper.toString("sh -c \"nc -ll -p 4444 -e printf \\\"second banana\\\"\"");
+        String cid2 = dh.startContainer(map("{'base':'busybox','command':"+command+",'limit':{'cpu':512,'memory':'100m','disk':'220m'}}"));
         assertTrue("<"+cid2+"> is not valid container id", cid2.matches("[0-9a-f]{15,}+"));
         assertEquals("second banana", request(dh.getIp(cid2), 4444));
 
@@ -103,17 +94,15 @@ public class DockerHelperTest {
 
     @Test
     public void removeContainer() throws Exception {
-        Map<String, Object> config = getConfig(512, 100_000_000, 220_000_000, "busybox", "sleep 10m");
-
-        String cid1 = dh.startContainer(config);
+        String cid1 = dh.startContainer(map("{'base':'busybox','command':'sleep 10m','limit':{'cpu':512,'memory':'100m','disk':'220m'}}"));
         String ip6_1 = dh.getIp(cid1);
         assertTrue("<"+ip6_1+"> is not valid ip6 address", ip6_1.matches("[0-9a-f:]{3,}+"));
-        String cid2 = dh.startContainer(config);
+        String cid2 = dh.startContainer(map("{'base':'busybox','command':'sleep 10m','limit':{'cpu':512,'memory':'100m','disk':'220m'}}"));
         String ip6_2 = dh.getIp(cid2);
         assertTrue("<"+ip6_2+"> is not valid ip6 address", ip6_2.matches("[0-9a-f:]{3,}+"));
         assertNotEquals(ip6_1, ip6_2);
         dh.removeContainer(cid1);
-        String cid3 = dh.startContainer(config);
+        String cid3 = dh.startContainer(map("{'base':'busybox','command':'sleep 10m','limit':{'cpu':512,'memory':'100m','disk':'220m'}}"));
         String ip6_3 = dh.getIp(cid3);
         assertEquals(ip6_1, ip6_3);
     }

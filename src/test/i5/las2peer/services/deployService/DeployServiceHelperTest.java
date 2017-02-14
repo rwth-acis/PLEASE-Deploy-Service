@@ -41,26 +41,28 @@ public class DeployServiceHelperTest {
     static DockerHelper dh;
     static BuildhookVerifier bv;
     static String classHash = String.format("%4x", DeployServiceHelperTest.class.getName().hashCode() & 65535);
-    static String userId = "someUser"; 
+    static String userId = "someUser";
+    static String sinkUrl = "http://localhost:6800";
 
     @BeforeClass
     public static void setup() throws Exception {
         DockerHelper.removeAllContainers();
         dh = new DockerHelper(classHash, "fc00:"+classHash+"::");
-        HttpServer.create(new InetSocketAddress(6800), 0).start(); // sink
+        URI uri = new URI(sinkUrl);
+        HttpServer.create(new InetSocketAddress(uri.getHost(), uri.getPort()), 0).start(); // sink
     }
 
 
-    private DatabaseManager getMock(int testNumber) {
-        return new DatabaseManager(
-                "sa"
-                , ""
-                , "jdbc:h2:mem:deployservicehelpertest_"+testNumber+";DB_CLOSE_DELAY=-1"
-                , "testSchema"
-                , "./etc/db_migration"
-                , "./database"
-        );
+    static int count = 0;
+    private DeployServiceHelper getMock(String buildhookUrl) {
+        DatabaseManager dm = new DatabaseManager("sa", "",
+            "jdbc:h2:mem:deployservicehelpertest_"+count+++";DB_CLOSE_DELAY=-1", "testSchema",
+            "./etc/db_migration", "./database");
+        ResourceDistribution rd = new ResourceDistribution(dm, "1g", "1g", "1000");
+        return new DeployServiceHelper(dh, dm, rd, buildhookUrl);
     }
+    private JsonStructure json(Object s) { return JsonHelper.parse(((String)s).replaceAll("'","\"")); }
+    private Map<String,Object> map(String s) { return (Map) JsonHelper.toCollection(json(s)); }
     static Thread thUdp = null;
     private static void logUdp(String host, int port) throws IOException {
         if (thUdp == null) {
@@ -91,13 +93,6 @@ public class DeployServiceHelperTest {
             thUdp.start();
         }
     }
-    public static JsonStructure toJson(String s) {
-        JsonReader jr = Json.createReader(new StringReader(s));
-        JsonStructure js = jr.read();
-        jr.close();
-
-        return js;
-    }
     private String request(String ip6, int port) throws IOException {
         Socket sock = new Socket(ip6, port);
         Scanner s = new Scanner(sock.getInputStream()).useDelimiter("\\A");
@@ -107,171 +102,127 @@ public class DeployServiceHelperTest {
 
     @Test
     public void buildApp() {
-        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(2), "http://localhost:6800");
+        DeployServiceHelper dsh = getMock(sinkUrl);
         long bId0, bId1, bId2, bId3;
         Response r;
 
-        Map<String, Object> build_config = new HashMap<>();
-            build_config.put("app", 457);
-            build_config.put("version", "v1");
-        r = dsh.buildApp(build_config);
+        r = dsh.buildApp(map("{'app':457,'version':'v1'}"));
         assertEquals(200, r.getStatus());
-        bId0 = ((JsonObject)toJson((String) r.getEntity())).getJsonNumber("buildid").longValue();
+        bId0 = ((JsonObject)json(r.getEntity())).getJsonNumber("buildid").longValue();
         assertTrue("<"+bId0+"> must be valid timestamp", bId0 > Integer.MAX_VALUE);
-        r = dsh.buildApp(build_config);
+        r = dsh.buildApp(map("{'app':457,'version':'v1'}"));
         assertEquals(200, r.getStatus());
-            build_config.put("version", "v2");
-        bId1 = ((JsonObject)toJson((String) r.getEntity())).getJsonNumber("buildid").longValue();
+        bId1 = ((JsonObject)json(r.getEntity())).getJsonNumber("buildid").longValue();
         assertTrue("<"+bId1+"> must be valid timestamp", bId1 > bId0);
-        r = dsh.buildApp(build_config);
+        r = dsh.buildApp(map("{'app':457,'version':'v2'}"));
         assertEquals(200, r.getStatus());
-            build_config.put("app", 458);
-            build_config.put("version", "v1");
-        bId2 = ((JsonObject)toJson((String) r.getEntity())).getJsonNumber("buildid").longValue();
+        bId2 = ((JsonObject)json(r.getEntity())).getJsonNumber("buildid").longValue();
         assertTrue("<"+bId2+"> must be valid timestamp", bId2 > bId1);
-        r = dsh.buildApp(build_config);
+        r = dsh.buildApp(map("{'app':458,'version':'v1'}"));
         assertEquals(200, r.getStatus());
-        bId3 = ((JsonObject)toJson((String) r.getEntity())).getJsonNumber("buildid").longValue();
+        bId3 = ((JsonObject)json(r.getEntity())).getJsonNumber("buildid").longValue();
         assertTrue("<"+bId3+"> must be valid timestamp", bId3 > bId2);
         r = dsh.getBuild(null, null, null);
         assertEquals(200, r.getStatus());
-        assertEquals(toJson("{\"457\":{\"v1\":["+bId0+","+bId1+"],\"v2\":["+bId2+"]},\"458\":{\"v1\":["+bId3+"]}}")
-            , toJson(r.getEntity().toString()));
+        assertEquals(json("{'457':{'v1':["+bId0+","+bId1+"],'v2':["+bId2+"]},'458':{'v1':["+bId3+"]}}")
+            , json(r.getEntity()));
         r = dsh.getBuild(457, null, null);
         assertEquals(200, r.getStatus());
-        assertEquals(toJson("{\"457\":{\"v1\":["+bId0+","+bId1+"],\"v2\":["+bId2+"]}}")
-            , toJson(r.getEntity().toString()));
+        assertEquals(json("{'457':{'v1':["+bId0+","+bId1+"],'v2':["+bId2+"]}}")
+            , json(r.getEntity()));
         r = dsh.getBuild(457, "v1", null);
         assertEquals(200, r.getStatus());
-        assertEquals(toJson("{\"457\":{\"v1\":["+bId0+","+bId1+"]}}")
-            , toJson(r.getEntity().toString()));
+        assertEquals(json("{'457':{'v1':["+bId0+","+bId1+"]}}")
+            , json(r.getEntity()));
     }
 
     @Test
     public void deployApp() throws Exception {
-        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(3), "http://localhost:6800");
-        Map<String, Object> deploy_config;
-        Map<String, Object> build_config;
+        DeployServiceHelper dsh = getMock(sinkUrl);
         Response r;
         JsonObject jo;
 
         // build, deploy and test connection
-        build_config = new HashMap<>();
-            build_config.put("app", 456);
-            build_config.put("version", "v1");
-        assertEquals(200, dsh.buildApp(build_config).getStatus());
+        assertEquals(200, dsh.buildApp(map("{'app':456,'version':'v1'}")).getStatus());
 
-        deploy_config = new HashMap<>();
-            deploy_config.put("app", 456);
-            deploy_config.put("version", "v1");
-            deploy_config.put("base", "busybox");
-                Map<String, Object> env = new HashMap<>();
-                env.put("AA", "xx");
-                env.put("BB_B", "xx x");
-            deploy_config.put("env", env);
-            // final                                   printf •••"hi;••$AA;••${BB_B}•••"
-            // in container   nc -l -p 5000 -e sh -c •"printf •\•"hi;••$AA;••${BB_B}•\•"•"
-            // docker run     nc -l -p 5000 -e sh -c •"printf •\•"hi;•\$AA;•\${BB_B}•\•"•"
-            String command = "nc -l -p 5000 -e sh -c \"printf \\\"hi;\\$AA;\\${BB_B}\\\"\"";
-            deploy_config.put("command", command);
-        r = dsh.deployApp(deploy_config, userId);
+        // final                                   printf •••"hi;••$AA;••${BB_B}•••"
+        // in container   nc -l -p 5000 -e sh -c •"printf •\•"hi;••$AA;••${BB_B}•\•"•"
+        // docker run     nc -l -p 5000 -e sh -c •"printf •\•"hi;•\$AA;•\${BB_B}•\•"•"
+        String command = "nc -l -p 5000 -e sh -c \"printf \\\"hi;\\$AA;\\${BB_B}\\\"\"";
+        r = dsh.deployApp(map("{" +
+                "'app': 456," +
+                "'version': 'v1'," +
+                "'base': 'busybox'," +
+                "'env': {" +
+                    "'AA': 'xx'," +
+                    "'BB_B': 'xx x'" +
+                "}," +
+                "'command': " + JsonHelper.toString(command) +
+            "}"), userId);
         assertEquals(201, r.getStatus());
-        jo = (JsonObject) toJson(r.getEntity().toString());
+        jo = (JsonObject) json(r.getEntity());
         assertTrue("Response must include iid", jo.getInt("iid",-1) != -1);
         assertTrue("Must be ip6: <"+jo.getString("ip6")+">", jo.getString("ip6").matches("[0-9a-f:]{3,}+"));
         assertEquals("hi;xx;xx x", request(jo.getString("ip6"), 5000));
         r = dsh.getDeployments(null, false, null);
         assertEquals(200, r.getStatus());
         assertTrue("must match {\"456\":\\[[0-9]*\\]}"
-            , toJson(r.getEntity().toString()).toString().matches("^\\{\"456\":\\[[0-9]*\\]\\}"));
+            , json(r.getEntity()).toString().matches("^\\{\"456\":\\[[0-9]*\\]\\}"));
 
         // build and deploy from build
-        build_config = new HashMap<>();
-            build_config.put("app", 777);
-            build_config.put("version", "v2.0");
-            build_config.put("base", "busybox");
-            build_config.put("full", "sh -c \"printf apple > ./somefile\"");
-        r = dsh.buildApp(build_config);
+        r = dsh.buildApp(map("{'app':777,'version':'v2.0','base':'busybox','full':"+JsonHelper.toString("sh -c \"printf apple > ./somefile\"")+"}"));
         assertEquals(200, r.getStatus());
-        deploy_config = new HashMap<>();
-            deploy_config.put("app", 777);
-            deploy_config.put("version", "v1.9");
-            deploy_config.put("base", "build");
-            deploy_config.put("command", "nc -l -p 5000 -e cat ./somefile");
-        r = dsh.deployApp(deploy_config, userId);
+        r = dsh.deployApp(map("{'app':777,'version':'v1.9','base':'build','command':'nc -l -p 5000 -e cat ./somefile'}"), userId);
         assertEquals(404, r.getStatus());
-        deploy_config.put("version", "v2.0");
-        r = dsh.deployApp(deploy_config, userId);
+        r = dsh.deployApp(map("{'app':777,'version':'v2.0','base':'build','command':'nc -l -p 5000 -e cat ./somefile'}"), userId);
         assertEquals(201, r.getStatus());
-        jo = (JsonObject) toJson(r.getEntity().toString());
+        jo = (JsonObject) json(r.getEntity());
         assertEquals("apple", request(jo.getString("ip6"), 5000));
     }
 
     @Test
     public void updateApp() throws Exception {
-        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(4), "http://localhost:6800");
+        DeployServiceHelper dsh = getMock(sinkUrl);
         Response r;
         Map<String, Object> deploy_config;
         Map<String, Object> build_config;
 
         // build two versions
-        build_config = new HashMap<>();
-            build_config.put("app", 4);
-            build_config.put("version", "v1");
-            build_config.put("full", "printf 111 > somefile");
-        assertEquals(200, dsh.buildApp(build_config).getStatus());
-        build_config = new HashMap<>();
-            build_config.put("app", 4);
-            build_config.put("version", "v2");
-            build_config.put("full", "printf 222 > somefile");
-        assertEquals(200, dsh.buildApp(build_config).getStatus());
+        assertEquals(200, dsh.buildApp(map("{'app':4,'version':'v1','full':'printf 111 > somefile'}")).getStatus());
+        assertEquals(200, dsh.buildApp(map("{'app':4,'version':'v2','full':'printf 222 > somefile'}")).getStatus());
 
         // deploy first version
-        deploy_config = new HashMap<>();
-            deploy_config.put("app", 4);
-            deploy_config.put("version", "v1");
-            deploy_config.put("base", "build");
-            deploy_config.put("command", "nc -ll -p 5000 -e cat somefile");
-        r = dsh.deployApp(deploy_config, userId);
+        r = dsh.deployApp(map("{'app':4,'version':'v1','base':'build','command':'nc -ll -p 5000 -e cat somefile'}"), userId);
         assertEquals(201, r.getStatus());
-        JsonObject jo = (JsonObject) toJson(r.getEntity().toString());
+        JsonObject jo = (JsonObject) json(r.getEntity());
         assertEquals("111", request(jo.getString("ip6"), 5000));
 
         // update to second version
-            deploy_config.put("version", "v2");
-        r = dsh.updateApp(jo.getInt("iid"), deploy_config);
+        r = dsh.updateApp(jo.getInt("iid"),
+                map("{'app':4,'version':'v2','base':'build','command':'nc -ll -p 5000 -e cat somefile'}"), userId);
         assertEquals(200, r.getStatus());
         assertEquals("222", request(jo.getString("ip6"), 5000));
     }
 
     @Test
     public void undeploy() {
-        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(5), "http://localhost:6800");
+        DeployServiceHelper dsh = getMock(sinkUrl);
         Response r;
 
-        Map<String, Object> build_config = new HashMap<>();
-            build_config.put("app", 457);
-            build_config.put("version", "v1");
-        assertEquals(200, dsh.buildApp(build_config).getStatus());
-            build_config.put("version", "v2");
-        assertEquals(200, dsh.buildApp(build_config).getStatus());
-        Map<String, Object> deploy_config = new HashMap<>();
-            deploy_config.put("app", 457);
-            deploy_config.put("version", "v1");
-            deploy_config.put("command", "sleep 10m");
-        r = dsh.deployApp(deploy_config, userId);
+        assertEquals(200, dsh.buildApp(map("{'app':457,'version':'v1'}")).getStatus());
+        assertEquals(200, dsh.buildApp(map("{'app':457,'version':'v2'}")).getStatus());
+        r = dsh.deployApp(map("{'app':457,'version':'v1','command':'sleep 10m'}"), userId);
         assertEquals(201, r.getStatus());
-        int iid1 = ((JsonObject)toJson(r.getEntity().toString())).getInt("iid");
-        r = dsh.deployApp(deploy_config, userId);
+        int iid1 = ((JsonObject)json(r.getEntity())).getInt("iid");
+        r = dsh.deployApp(map("{'app':457,'version':'v1','command':'sleep 10m'}"), userId);
         assertEquals(201, r.getStatus());
-        int iid2 = ((JsonObject)toJson(r.getEntity().toString())).getInt("iid");
+        int iid2 = ((JsonObject)json(r.getEntity())).getInt("iid");
         assertNotEquals(iid1, iid2);
-            deploy_config.put("version", "v2");
-        assertEquals(200, dsh.updateApp(iid1, deploy_config).getStatus());
-        assertEquals(200, dsh.undeploy(iid1).getStatus());
+        assertEquals(200, dsh.updateApp(iid1, map("{'app':457,'version':'v2','command':'sleep 10m'}"), userId).getStatus());
+        assertEquals(200, dsh.undeploy(iid1, userId).getStatus());
         r = dsh.getDeployments(null, false, null);
         assertEquals(200, r.getStatus());
-        JsonObject deployments = (JsonObject) toJson(r.getEntity().toString());
+        JsonObject deployments = (JsonObject) json(r.getEntity());
         assertTrue(((JsonArray)deployments.get("457")).size() == 1);
         assertTrue(((JsonArray)deployments.get("457")).getInt(0) == iid2);
     }
@@ -281,14 +232,14 @@ public class DeployServiceHelperTest {
         HttpServer server;
         BlockingQueue<String> got = new LinkedBlockingQueue<>();
 
-        public BuildhookVerifier() throws IOException {
-            server = HttpServer.create(new InetSocketAddress(7001), 0);
+        public BuildhookVerifier(int port) throws IOException {
+            server = HttpServer.create(new InetSocketAddress(port), 0);
             server.createContext("/hook", httpExchange -> {
                 try {
                     InputStream is = httpExchange.getRequestBody();
                     Scanner s = new Scanner(is).useDelimiter("\\A");
                     got.add(s.hasNext() ? s.next() : "");
-                } catch(Exception e) { e.printStackTrace(); }
+                } catch(Exception e) { StringWriter sw = new StringWriter();e.printStackTrace(new PrintWriter(sw));l.error(sw.toString()); }
             });
             server.setExecutor(null); // creates a default executor
             server.start();
@@ -298,21 +249,33 @@ public class DeployServiceHelperTest {
             if (last == null) throw new TimeoutException();
             return last;
         }
-        public String url() { return "http://localhost:7001/hook"; }
+        public String url() {
+            try { return new URI("http", null, server.getAddress().getHostName(), server.getAddress().getPort(), "/hook", null, null).toString(); }
+            catch (URISyntaxException e) { StringWriter sw = new StringWriter();e.printStackTrace(new PrintWriter(sw));l.error(sw.toString()); }
+            return null;
+        }
     }
     @Test
-    public void buildhook() throws TimeoutException, InterruptedException, IOException {
-        BuildhookVerifier bv = new BuildhookVerifier();
-        DeployServiceHelper dsh = new DeployServiceHelper(dh, getMock(5), bv.url());
+    public void buildhook() throws Exception {
+        BuildhookVerifier bv = new BuildhookVerifier(7001);
+        DeployServiceHelper dsh = getMock(bv.url());
         Response r;
 
-        Map<String, Object> build_config = new HashMap<>();
-            build_config.put("app", 457);
-            build_config.put("version", "v1");
-        r = dsh.buildApp(build_config);
+        r = dsh.buildApp(map("{'app':457,'version':'v1'}"));
         assertEquals(200, r.getStatus());
-        long bId = ((JsonObject)toJson((String) r.getEntity())).getJsonNumber("buildid").longValue();
-        JsonObject jo = (JsonObject) toJson(bv.await(1000));
-        assertEquals(toJson("{\"app\":457,\"version\":\"v1\",\"buildid\":"+bId+",\"exitCode\":0,\"runtime\":"+jo.getInt("runtime")+"}"), jo);
+        long bId = ((JsonObject)json(r.getEntity())).getJsonNumber("buildid").longValue();
+        JsonObject jo = (JsonObject) json(bv.await(1000));
+        assertEquals(json("{'app':457,'version':'v1','buildid':"+bId+",'exitCode':0,'runtime':"+jo.getInt("runtime")+"}"), jo);
+    }
+
+    @Test
+    public void limits() throws InterruptedException {
+        DeployServiceHelper dsh = getMock(sinkUrl);
+        Response r;
+
+        assertEquals(200, dsh.buildApp(map("{'app':457,'version':'v1'}")).getStatus());
+        assertEquals(201, dsh.deployApp(map("{'app':457,'version':'v1','limit':{'cpu':'500'},'command':'sleep 10'}"), userId).getStatus());
+        assertEquals(201, dsh.deployApp(map("{'app':457,'version':'v1','limit':{'cpu':'500'},'command':'sleep 10'}"), userId).getStatus());
+        assertEquals(402, dsh.deployApp(map("{'app':457,'version':'v1','limit':{'cpu':'1'},'command':'sleep 10'}"), userId).getStatus());
     }
 }

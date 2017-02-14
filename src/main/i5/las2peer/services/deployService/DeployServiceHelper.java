@@ -156,6 +156,7 @@ public class DeployServiceHelper {
             docker_config.put("base", base);
             docker_config.put("command", build_full);
             docker_config.put("env", env);
+            docker_config.put("limit", limit);
 
             // TODO this is not 100% thread-safe (seems not to be worth it)
             long buildid = System.currentTimeMillis();
@@ -205,7 +206,7 @@ public class DeployServiceHelper {
                 base = imageid;
             }
 
-            Map<String,String> limit = (Map<String, String>) config.get("limit");
+            Map<String,Integer> limit = rd.parse((Map<String, String>) config.get("limit"));
             if (!rd.checkUserAffordable(limit, userId))
                 return Response.status(402).entity("You have not enough free resources: "+rd.account(userId).toString()).build();
 
@@ -244,10 +245,10 @@ public class DeployServiceHelper {
             if (((Integer)config.get("app")).intValue() != rs.getInt("app"))
                 return Response.status(400).entity("App id does not match deployment").build();
 
-            Map<String,String> limit = new HashMap<>();
-                limit.put("memory", rs.getString("memory"));
-                limit.put("disk", rs.getString("disk"));
-                limit.put("cpu", rs.getString("cpu"));
+            Map<String,Integer> limit = new HashMap<>();
+                limit.put("memory", rs.getInt("memory"));
+                limit.put("disk", rs.getInt("disk"));
+                limit.put("cpu", rs.getInt("cpu"));
 
             rs = dm.query("SELECT * FROM build_containers WHERE app=? AND version=?", rs.getInt("app"), config.get("version"));
             if (!rs.next())

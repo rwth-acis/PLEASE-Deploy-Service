@@ -98,7 +98,7 @@ public class DeployService extends RESTService {
 		@Path("/deployed")
 		@Produces(MediaType.APPLICATION_JSON)
 		public Response deployApp(String config) {
-			return dsh.deployApp((Map<String, Object>) toCollection(toJson(config)), getActiveUser());
+			return dsh.deployApp((Map<String, Object>) JsonHelper.toCollection(config), getActiveUser());
 		}
 
 		@GET
@@ -112,7 +112,7 @@ public class DeployService extends RESTService {
 		@Path("/deployed/{iid}")
 		@Produces(MediaType.APPLICATION_JSON)
 		public Response updateApp(@PathParam("iid") int iid, String config) {
-			return dsh.updateApp(iid, (Map<String, Object>) toCollection(toJson(config)), getActiveUser());
+			return dsh.updateApp(iid, (Map<String, Object>) JsonHelper.toCollection(config), getActiveUser());
 		}
 
 		@DELETE
@@ -157,7 +157,7 @@ public class DeployService extends RESTService {
 		@Path("/build")
 		@Produces(MediaType.APPLICATION_JSON)
 		public Response buildApp(String config) {
-			return dsh.buildApp((Map<String, Object>) toCollection(toJson(config)));
+			return dsh.buildApp((Map<String, Object>) JsonHelper.toCollection(config));
 		}
 
 		private String getActiveUser() {
@@ -166,44 +166,6 @@ public class DeployService extends RESTService {
 				return "anonymous";
 			else
 				return String.valueOf(ua.getId());
-		}
-
-		public static JsonStructure toJson(String s) {
-			JsonReader jr = Json.createReader(new StringReader(s));
-			JsonStructure js = jr.read();
-			jr.close();
-
-			return js;
-		}
-		public static Object toCollection(JsonValue json) {
-			if (json instanceof JsonObject) {
-				Map<String, Object> res = new HashMap<>();
-				((JsonObject) json).forEach(
-						(key, value) ->
-								res.put(key, toCollection(value))
-				);
-				return res;
-			} else if (json instanceof JsonArray) {
-				List<Object> res = new LinkedList<>();
-				((JsonArray) json).forEach(
-						(value) ->
-								res.add(toCollection(value))
-				);
-				return res;
-			} else if (json instanceof JsonNumber) {
-				if (((JsonNumber) json).isIntegral())
-					return ((JsonNumber) json).intValue();
-				else
-					return ((JsonNumber) json).doubleValue();
-			} else if (json instanceof JsonString) {
-				return ((JsonString) json).getString();
-			} else if (json.equals(JsonValue.FALSE)) {
-				return false;
-			} else if (json.equals(JsonValue.TRUE)) {
-				return true;
-			} else /*if (json.equals(JsonValue.NULL))*/ {
-				return null;
-			}
 		}
 	}
 }
