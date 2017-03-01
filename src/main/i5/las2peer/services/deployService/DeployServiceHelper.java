@@ -23,7 +23,7 @@ import java.util.*;
  * Created by adabru on 26.12.16.
  */
 public class DeployServiceHelper {
-    private Logger l = LoggerFactory.getLogger(DockerHelper.class.getName());
+    private static Logger l = LoggerFactory.getLogger(DockerHelper.class.getName());
 
     private DockerHelper dh;
     private DatabaseManager dm;
@@ -115,11 +115,19 @@ public class DeployServiceHelper {
                     if (curVersion != null)
                         jg.writeEnd();
                     curVersion = rs.getString("version");
-                    jg.writeStartArray(curVersion);
+                    jg.writeStartObject(curVersion);
                 }
-                jg.write(rs.getLong("buildid"));
+                jg.writeStartObject(String.valueOf(rs.getLong("buildid")));
+                if(rs.getString("exitcode") != null)
+                    jg.write("exitcode", rs.getInt("exitcode"))
+                    .write("runtime", rs.getInt("runtime"));
+                else
+                    jg.write("runtime", System.currentTimeMillis() - rs.getLong("buildid"));
+                jg.writeEnd();
             }
-            jg.writeEnd().writeEnd().writeEnd().close();
+            if(curApp != lnull)
+                jg.writeEnd().writeEnd();
+            jg.writeEnd().close();
             return Response.ok(baos.toString("utf8")).build();
         } catch (SQLException | IOException | InterruptedException e) {
             StringWriter sw = new StringWriter();e.printStackTrace(new PrintWriter(sw));l.error(sw.toString());
@@ -128,14 +136,19 @@ public class DeployServiceHelper {
     }
 
     public static class BuildHook extends DockerHelper.FinishProcessCallback {
-        int app; String version; long buildid; WebTarget receiver;
-        public BuildHook(int app, String version, long buildid, WebTarget receiver) {
-            this.app = app; this.version = version; this.buildid = buildid; this.receiver = receiver;
+        int app; String version; long buildid; WebTarget receiver; DatabaseManager dm;
+        public BuildHook(int app, String version, long buildid, WebTarget receiver, DatabaseManager dm) {
+            this.app = app; this.version = version; this.buildid = buildid; this.receiver = receiver; this.dm = dm;
         }
         @Override
         public void run() {
+            try {
+                dm.update("UPDATE build_containers SET (exitcode,runtime)=(?,?) WHERE buildid=?", exitCode, System.currentTimeMillis() - buildid, buildid);
+            } catch (SQLException e) {
+                StringWriter sw = new StringWriter();e.printStackTrace(new PrintWriter(sw));l.error(sw.toString());
+            }
             receiver.request().post(Entity.entity(
-                "{\"app\":"+app+",\"version\":\""+version+"\",\"buildid\":"+buildid+",\"exitCode\":"+exitCode+",\"runtime\":"+runtime+"}"
+                "{\"app\":"+app+",\"version\":\""+version+"\",\"buildid\":"+buildid+",\"exitcode\":"+exitCode+",\"runtime\":"+runtime+"}"
                 ,"application/json"));
         }
     }
@@ -160,8 +173,8 @@ public class DeployServiceHelper {
 
             // TODO this is not 100% thread-safe (seems not to be worth it)
             long buildid = System.currentTimeMillis();
-            String cid = dh.startContainer(docker_config, new BuildHook(app, version, buildid, buildhookReceiver));
-            dm.update("INSERT INTO build_containers VALUES (?, ?, ?, ?, NULL)", app, version, cid, buildid);
+            String cid = dh.startContainer(docker_config, new BuildHook(app, version, buildid, buildhookReceiver, dm));
+            dm.update("INSERT INTO build_containers VALUES (?, ?, ?, ?, NULL, NULL, NULL)", app, version, cid, buildid);
             return Response.ok("{\"buildid\":"+buildid+"}","application/json").build();
         } catch (SQLException | IOException | InterruptedException e) {
             StringWriter sw = new StringWriter();e.printStackTrace(new PrintWriter(sw));l.error(sw.toString());

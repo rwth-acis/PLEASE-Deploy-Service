@@ -61,7 +61,16 @@ public class DeployServiceHelperTest {
         ResourceDistribution rd = new ResourceDistribution(dm, "1g", "1g", "1000");
         return new DeployServiceHelper(dh, dm, rd, buildhookUrl);
     }
-    private JsonStructure json(Object s) { return JsonHelper.parse(((String)s).replaceAll("'","\"")); }
+    private JsonValue json_path(Object o, String... path) {
+        if (o instanceof Response) o = ((Response)o).getEntity();
+        JsonValue jo = json(o);
+        for (String k: path) if ((jo = ((JsonObject)jo).get(k)) == null) throw new IllegalArgumentException(o.toString());
+        return jo;
+    }
+    private JsonStructure json(Object s) {
+        if (s instanceof Response) s = ((Response) s).getEntity();
+        return JsonHelper.parse(((String)s).replaceAll("'","\""));
+    }
     private Map<String,Object> map(String s) { return (Map) JsonHelper.toCollection(json(s)); }
     static Thread thUdp = null;
     private static void logUdp(String host, int port) throws IOException {
@@ -106,34 +115,35 @@ public class DeployServiceHelperTest {
         long bId0, bId1, bId2, bId3;
         Response r;
 
+        r = dsh.getBuild(457, null, null);
+        assertEquals(200, r.getStatus());
+        assertEquals(json("{}"), json(r.getEntity()));
         r = dsh.buildApp(map("{'app':457,'version':'v1'}"));
         assertEquals(200, r.getStatus());
-        bId0 = ((JsonObject)json(r.getEntity())).getJsonNumber("buildid").longValue();
+        bId0 = ((JsonNumber)json_path(r,"buildid")).longValue();
         assertTrue("<"+bId0+"> must be valid timestamp", bId0 > Integer.MAX_VALUE);
         r = dsh.buildApp(map("{'app':457,'version':'v1'}"));
         assertEquals(200, r.getStatus());
-        bId1 = ((JsonObject)json(r.getEntity())).getJsonNumber("buildid").longValue();
+        bId1 = ((JsonNumber)json_path(r,"buildid")).longValue();
         assertTrue("<"+bId1+"> must be valid timestamp", bId1 > bId0);
         r = dsh.buildApp(map("{'app':457,'version':'v2'}"));
         assertEquals(200, r.getStatus());
-        bId2 = ((JsonObject)json(r.getEntity())).getJsonNumber("buildid").longValue();
+        bId2 = ((JsonNumber)json_path(r,"buildid")).longValue();
         assertTrue("<"+bId2+"> must be valid timestamp", bId2 > bId1);
         r = dsh.buildApp(map("{'app':458,'version':'v1'}"));
         assertEquals(200, r.getStatus());
-        bId3 = ((JsonObject)json(r.getEntity())).getJsonNumber("buildid").longValue();
+        bId3 = ((JsonNumber)json_path(r,"buildid")).longValue();
         assertTrue("<"+bId3+"> must be valid timestamp", bId3 > bId2);
         r = dsh.getBuild(null, null, null);
         assertEquals(200, r.getStatus());
-        assertEquals(json("{'457':{'v1':["+bId0+","+bId1+"],'v2':["+bId2+"]},'458':{'v1':["+bId3+"]}}")
-            , json(r.getEntity()));
+        assertTrue(json(r).toString(), json_path(r,"457", "v1", String.valueOf(bId0)).toString().length() > 10);
+        assertTrue(json(r).toString(), json_path(r,"457", "v1", String.valueOf(bId1)).toString().length() > 10);
+        assertTrue(json(r).toString(), json_path(r,"457", "v2", String.valueOf(bId2)).toString().length() > 10);
+        assertTrue(json(r).toString(), json_path(r,"458", "v1", String.valueOf(bId3)).toString().length() > 10);
         r = dsh.getBuild(457, null, null);
         assertEquals(200, r.getStatus());
-        assertEquals(json("{'457':{'v1':["+bId0+","+bId1+"],'v2':["+bId2+"]}}")
-            , json(r.getEntity()));
         r = dsh.getBuild(457, "v1", null);
         assertEquals(200, r.getStatus());
-        assertEquals(json("{'457':{'v1':["+bId0+","+bId1+"]}}")
-            , json(r.getEntity()));
     }
 
     @Test
@@ -265,7 +275,7 @@ public class DeployServiceHelperTest {
         assertEquals(200, r.getStatus());
         long bId = ((JsonObject)json(r.getEntity())).getJsonNumber("buildid").longValue();
         JsonObject jo = (JsonObject) json(bv.await(1000));
-        assertEquals(json("{'app':457,'version':'v1','buildid':"+bId+",'exitCode':0,'runtime':"+jo.getInt("runtime")+"}"), jo);
+        assertEquals(json("{'app':457,'version':'v1','buildid':"+bId+",'exitcode':0,'runtime':"+jo.getInt("runtime")+"}"), jo);
     }
 
     @Test

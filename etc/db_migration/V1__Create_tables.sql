@@ -8,6 +8,8 @@ CREATE TABLE build_containers (
 , `cid` VARCHAR(255)
 , `buildid` BIGINT
 , `imageid` VARCHAR(255)
+, `exitcode` INT
+, `runtime` INT
 , CONSTRAINT pk_build PRIMARY KEY (buildid)
 );
 

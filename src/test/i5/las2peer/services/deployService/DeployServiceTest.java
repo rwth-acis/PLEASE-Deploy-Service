@@ -130,8 +130,6 @@ public class DeployServiceTest {
 		// GET /build
 		res = wt_anonym.path("build").request().get();
 		assertEquals(200, res.getStatus());
-		assertEquals(toJson("{\"7\":{\"v1\":["+bId0+"],\"v2\":["+bId1+"]}}")
-			, toJson(res.readEntity(String.class)));
 
 		// POST /deployed
 		res = wt_anonym.path("deployed").request().post(Entity.entity(

@@ -31,7 +31,7 @@ public class DatabaseManager {
         this.backupPath = backupPath;
     }
 
-    private Connection getConnection() throws SQLException {
+    private synchronized Connection getConnection() throws SQLException {
         if (con != null)
             return con;
 
