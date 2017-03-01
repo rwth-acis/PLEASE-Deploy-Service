@@ -1,34 +1,26 @@
 package i5.las2peer.services.deployService;
 
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
-import com.sun.org.apache.xalan.internal.xsltc.compiler.util.MultiHashtable;
-import jdk.nashorn.api.scripting.JSObject;
-import org.hamcrest.Description;
-import org.hamcrest.TypeSafeMatcher;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import sun.net.httpserver.HttpServerImpl;
 
 import javax.json.*;
-import javax.ws.rs.client.Entity;
 import javax.ws.rs.core.Response;
-
-import java.io.*;
-import java.lang.reflect.Field;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Scanner;
-import java.util.concurrent.*;
-import java.util.regex.Pattern;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.Assert.*;
 
@@ -39,7 +31,6 @@ public class DeployServiceHelperTest {
     static Logger l = LoggerFactory.getLogger("");
 
     static DockerHelper dh;
-    static BuildhookVerifier bv;
     static String classHash = String.format("%4x", DeployServiceHelperTest.class.getName().hashCode() & 65535);
     static String userId = "someUser";
     static String sinkUrl = "http://localhost:6800";
