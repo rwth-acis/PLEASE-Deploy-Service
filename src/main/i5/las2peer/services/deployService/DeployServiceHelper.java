@@ -205,7 +205,7 @@ public class DeployServiceHelper {
         setDeployDefaults(config);
 
         try {
-            ResultSet rs = dm.query("SELECT * FROM build_containers WHERE app=? AND version=?", app, version);
+            ResultSet rs = dm.query("SELECT * FROM build_containers WHERE app=? AND version=? ORDER BY buildid DESC", app, version);
             if (!rs.next())
                 return Response.status(404).entity("No build found for given app and version!").build();
 
@@ -263,7 +263,7 @@ public class DeployServiceHelper {
                 limit.put("disk", rs.getInt("disk"));
                 limit.put("cpu", rs.getInt("cpu"));
 
-            rs = dm.query("SELECT * FROM build_containers WHERE app=? AND version=?", rs.getInt("app"), config.get("version"));
+            rs = dm.query("SELECT * FROM build_containers WHERE app=? AND version=? ORDER BY buildid DESC", rs.getInt("app"), config.get("version"));
             if (!rs.next())
                 return Response.status(404).entity("No build found for given app and version!").build();
 
